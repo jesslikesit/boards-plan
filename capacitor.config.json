@@ -1,0 +1,8 @@
+{
+  "appId": "com.jess.boardplan",
+  "appName": "Board Plan",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#020617"
+  }
+}

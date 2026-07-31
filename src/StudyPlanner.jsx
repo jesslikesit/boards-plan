@@ -415,9 +415,7 @@ function dayType(key, state) {
 }
 
 function capacityFor(key, state) {
-  const t = dayType(key, state);
-  if (t === "off") return 0;
-  if (t === "hard") return 1;
+  if (dayType(key, state) === "off") return 0;
   return baseCapacity(key, state.settings);
 }
 
@@ -526,17 +524,10 @@ function computeEngine(cur, state, today) {
     // Pass 1 is earned by completion, not by assignment: 3 questions per video
     // you actually finished. `pass1Planned` is what today becomes if you finish it.
     const isRandom = ph.id === "random";
-    const dt = dayType(k, state);
     const pass1 = isRandom
       ? (isWeekend(k) ? S.randomWeekendQ : S.randomWorkdayQ)
-      : dt === "hard"
-      ? Math.min(1, already.length)
       : already.length * 3;
-    const pass1Planned = isRandom
-      ? pass1
-      : dt === "hard"
-      ? 1
-      : shown.length * 3;
+    const pass1Planned = isRandom ? pass1 : shown.length * 3;
 
     plan.push({
       key: k,
@@ -702,21 +693,38 @@ const DEFAULT_SETTINGS = {
   sectionOrder: SECTIONS.map((s) => s.id),
 };
 
-/* Already finished before this plan started: all of Endocrinology, and all of
-   Pulmonary except Cystic Fibrosis. Seeded so both feed the older-systems
-   question rotation instead of sitting in the video queue. */
+/* Pulmonary, as actually studied. Dated so the 5-7 day lookback that feeds
+   Pass 2 has real material to draw on. */
+const SEED_LOG = {
+  "2026-07-20": ["Asthma"],
+  "2026-07-21": ["COPD Diagnosis"],
+  "2026-07-22": ["COPD Treatment"],
+  "2026-07-23": ["Restrictive Lung Disease"],
+  "2026-07-24": ["Pneumonia"],
+  "2026-07-25": ["Lung Cancer", "Bronchiectasis", "Shock"],
+  "2026-07-26": ["Respiratory Failure", "Sepsis ARDS"],
+  "2026-07-27": ["Pulmonary Hypertension"],
+  "2026-07-28": ["DVT and Pulmonary Embolism"],
+  "2026-07-29": ["Pleural Disease"],
+};
+const SEED_DAYS = Object.fromEntries(
+  Object.entries(SEED_LOG).map(([k, titles]) => [
+    k,
+    { type: "normal", videosDone: titles.map((t) => vid("pulm", t)) },
+  ])
+);
+const SEED_DATED = new Set(Object.values(SEED_DAYS).flatMap((d) => d.videosDone));
+
+/* Finished, but with no date on record — all of Endocrinology, plus PFTs,
+   which predates the log above. These still feed the older-systems rotation. */
 const SEED_DONE = []
   .concat(SECTIONS.find((s) => s.id === "endo").videos.map((t) => vid("endo", t)))
-  .concat(
-    SECTIONS.find((s) => s.id === "pulm").videos
-      .filter((t) => t !== "Cystic Fibrosis")
-      .map((t) => vid("pulm", t))
-  );
+  .concat([vid("pulm", "Pulmonary Function Tests")]);
 
 const freshState = () => ({
-  version: 2,
+  version: 3,
   settings: { ...DEFAULT_SETTINGS },
-  days: {},
+  days: JSON.parse(JSON.stringify(SEED_DAYS)),
   preCompleted: SEED_DONE.slice(),
   extraVideos: {},
 });
@@ -730,9 +738,15 @@ async function loadState() {
     parsed.days = parsed.days || {};
     parsed.preCompleted = parsed.preCompleted || [];
     parsed.extraVideos = parsed.extraVideos || {};
-    if (!parsed.version || parsed.version < 2) {
-      parsed.preCompleted = Array.from(new Set(parsed.preCompleted.concat(SEED_DONE)));
-      parsed.version = 2;
+    if (!parsed.version || parsed.version < 3) {
+      // Pulmonary was previously seeded undated; move it onto real dates.
+      parsed.preCompleted = Array.from(
+        new Set(parsed.preCompleted.filter((id) => !SEED_DATED.has(id)).concat(SEED_DONE))
+      );
+      Object.keys(SEED_DAYS).forEach((k) => {
+        if (!parsed.days[k]) parsed.days[k] = JSON.parse(JSON.stringify(SEED_DAYS[k]));
+      });
+      parsed.version = 3;
     }
     return parsed;
   } catch (e) {
@@ -829,6 +843,7 @@ const inputCls =
    ============================================================ */
 
 function TodayView({ cur, state, en, today, update }) {
+  const nextUp = en.remaining[0];
   const day = en.plan.find((d) => d.key === today) || en.plan[0];
   const log = state.days[today] || {};
   const doneV = new Set(log.videosDone || []);
@@ -855,14 +870,12 @@ function TodayView({ cur, state, en, today, update }) {
       d.sketchyDone = d.sketchyDone.includes(k) ? d.sketchyDone.filter((x) => x !== k) : d.sketchyDone.concat(k);
     });
 
-  const type = log.type || "normal";
-  const hard = type === "hard";
-  const off = type === "off";
+  const off = (log.type || "normal") === "off";
   const articles = [];
   day.videos.forEach((v) => v.amboss.forEach((a) => articles.includes(a) || articles.push(a)));
   const qbanks = [];
   day.videos.forEach((v) => qbanks.includes(v.qbank) || qbanks.push(v.qbank));
-  const shownVideos = hard ? day.videos.slice(0, 1) : day.videos;
+  const shownVideos = day.videos;
 
   return (
     <div className="space-y-4">
@@ -893,8 +906,16 @@ function TodayView({ cur, state, en, today, update }) {
                 </Check>
               ))
             )}
-            {!hard &&
-              day.sketchy.map((s, i) => {
+            {nextUp ? (
+              <button
+                onClick={() => toggleV(nextUp.id)}
+                className="w-full text-left rounded border border-dashed border-slate-700 px-3 py-2.5 text-sm text-slate-400 hover:border-cyan-700 hover:text-cyan-300"
+              >
+                <span className="font-mono text-xs text-slate-600 mr-2">+</span>
+                Watched an extra one — log <span className="text-slate-300">{nextUp.title}</span>
+              </button>
+            ) : null}
+            {day.sketchy.map((s, i) => {
                 const k = s.s + ":" + s.t;
                 return (
                   <Check key={k + i} on={doneS.has(k)} onClick={() => toggleS(k)} sub={s.carried ? "carried from " + s.from : "with " + s.from}>
@@ -953,7 +974,7 @@ function TodayView({ cur, state, en, today, update }) {
             </div>
           </Block>
 
-          {!hard && day.pass2 && day.pass2.n && day.pass2.topics.length ? (
+          {day.pass2 && day.pass2.n && day.pass2.topics.length ? (
             <Block label="Recent mixed" note={day.pass2.n + " questions"}>
               <div className="rounded border border-slate-800 bg-slate-900 p-3">
                 <div className="text-xs uppercase tracking-wider text-slate-500 mb-1">AMBOSS session</div>
@@ -974,7 +995,7 @@ function TodayView({ cur, state, en, today, update }) {
             </Block>
           ) : null}
 
-          {!hard && day.pass3 && day.pass3.n && day.pass3.detail.length ? (
+          {day.pass3 && day.pass3.n && day.pass3.detail.length ? (
             <Block label="Older systems" note={day.pass3.n + " questions"}>
               {day.pass3.detail.map((x) => (
                 <div key={x.name} className="rounded border border-slate-800 bg-slate-900 p-3">
@@ -999,20 +1020,11 @@ function TodayView({ cur, state, en, today, update }) {
         </Block>
       ) : null}
 
-      <div className="flex gap-2 pt-2">
-        <button
-          onClick={() => setDay({ type: hard ? "normal" : "hard" })}
-          className={
-            "flex-1 py-3 rounded border text-sm " +
-            (hard ? "border-amber-700 bg-amber-950 text-amber-200" : "border-slate-700 text-slate-300 hover:border-slate-600")
-          }
-        >
-          {hard ? "hard day ✓" : "hard day"}
-        </button>
+      <div className="pt-2">
         <button
           onClick={() => setDay({ type: off ? "normal" : "off" })}
           className={
-            "flex-1 py-3 rounded border text-sm " +
+            "w-full py-3 rounded border text-sm " +
             (off ? "border-slate-600 bg-slate-800 text-slate-200" : "border-slate-700 text-slate-300 hover:border-slate-600")
           }
         >
@@ -1086,7 +1098,7 @@ function WeekView({ state, en, today, update, setTab }) {
                 {isToday ? " ·  today" : ""}
               </span>
               <span className="font-mono text-xs text-slate-600">
-                {type === "off" ? "off" : type === "hard" ? "hard" : day ? day.minutes + "m" : "—"}
+                {type === "off" ? "off" : day ? day.minutes + "m" : "—"}
               </span>
             </div>
 

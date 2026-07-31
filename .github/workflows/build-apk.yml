@@ -33,7 +33,7 @@ jobs:
 
       - name: Sync
         run: npx cap sync android
-        
+
       - name: Use the repo's stable signing key
         run: |
           mkdir -p ~/.android

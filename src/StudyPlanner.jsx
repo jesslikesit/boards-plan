@@ -290,6 +290,51 @@ const AMBOSS = {
   "renal:urinary-tract-malignancy": ["Renal cell carcinoma", "Bladder cancer", "Prostate cancer"],
   "renal:diuretics": ["Diuretics", "Loop diuretics", "Thiazide diuretics"],
   "renal:rhabdomyolysis": ["Rhabdomyolysis", "Compartment syndrome"],
+
+  "gi:esophageal-disorders": ["Achalasia", "Esophageal motility disorders", "Eosinophilic esophagitis"],
+  "gi:gerd-and-esophageal-cancer": ["Gastroesophageal reflux disease", "Barrett esophagus", "Esophageal cancer"],
+  "gi:gastric-disorders": ["Peptic ulcer disease", "Gastritis", "Helicobacter pylori infection"],
+  "gi:gastric-cancer": ["Gastric cancer", "MALT lymphoma"],
+  "gi:liver-disease": ["Liver function tests", "Alcoholic liver disease", "Nonalcoholic fatty liver disease"],
+  "gi:liver-masses": ["Hepatocellular carcinoma", "Hepatic hemangioma", "Focal nodular hyperplasia"],
+  "gi:cirrhosis": ["Cirrhosis", "Portal hypertension", "Hepatic encephalopathy", "Ascites"],
+  "gi:viral-hepatitis": ["Viral hepatitis", "Hepatitis B", "Hepatitis C"],
+  "gi:hyperbilirubinemia": ["Jaundice", "Gilbert syndrome", "Bilirubin metabolism"],
+  "gi:wilsons-disease": ["Wilson disease"],
+  "gi:hemochromatosis": ["Hereditary hemochromatosis"],
+  "gi:biliary-disease": ["Cholangitis", "Primary biliary cholangitis", "Primary sclerosing cholangitis"],
+  "gi:gallstone-disease": ["Cholelithiasis", "Cholecystitis", "Choledocholithiasis"],
+  "gi:pancreatic-cancer": ["Pancreatic cancer"],
+  "gi:pancreatitis": ["Acute pancreatitis", "Chronic pancreatitis"],
+  "gi:colon-cancer": ["Colorectal cancer", "Colorectal cancer screening", "Hereditary colorectal cancer syndromes"],
+  "gi:colorectal-disease": ["Diverticular disease", "Hemorrhoids", "Anal fissure"],
+  "gi:small-bowel-disease": ["Small bowel obstruction", "Ileus", "Mesenteric ischemia"],
+  "gi:inflammatory-bowel-disease": ["Crohn disease", "Ulcerative colitis", "Inflammatory bowel disease"],
+  "gi:diarrhea": ["Diarrhea", "Clostridioides difficile infection", "Infectious gastroenteritis"],
+  "gi:gastrointestinal-bleeding": ["Upper gastrointestinal bleeding", "Lower gastrointestinal bleeding", "Variceal bleeding"],
+  "gi:hernias": ["Abdominal wall hernias", "Inguinal hernia"],
+  "gi:malabsorption": ["Celiac disease", "Malabsorption", "Lactose intolerance"],
+  "gi:gastrointestinal-pharmacology": ["Proton pump inhibitors", "Antiemetics", "Laxatives"],
+
+  "cards:ekg-interpretation": ["Electrocardiogram", "ECG interpretation", "Cardiac axis"],
+  "cards:acls-and-tachycardias": ["Advanced cardiac life support", "Supraventricular tachycardia", "Ventricular tachycardia"],
+  "cards:atrial-fibrillation-and-flutter": ["Atrial fibrillation", "Atrial flutter", "CHA2DS2-VASc score"],
+  "cards:bradycardia": ["Bradycardia", "Atrioventricular block", "Sick sinus syndrome"],
+  "cards:coronary-artery-disease": ["Coronary artery disease", "Stable angina", "Cardiac stress testing"],
+  "cards:stemi": ["Myocardial infarction", "Acute coronary syndrome", "STEMI management"],
+  "cards:heart-failure-i": ["Heart failure", "Systolic heart failure", "BNP"],
+  "cards:heart-failure-ii": ["Heart failure", "Acute decompensated heart failure", "Heart failure management"],
+  "cards:cardiomyopathy": ["Cardiomyopathy", "Hypertrophic cardiomyopathy", "Dilated cardiomyopathy"],
+  "cards:heart-murmurs": ["Heart murmurs", "Cardiac auscultation"],
+  "cards:heart-sounds": ["Heart sounds", "Cardiac auscultation"],
+  "cards:cardiovascular-pharmacology-i": ["Beta blockers", "ACE inhibitors", "Calcium channel blockers"],
+  "cards:cardiovascular-pharmacology-ii": ["Antiarrhythmic drugs", "Digoxin"],
+  "cards:pericardial-disease": ["Pericarditis", "Cardiac tamponade", "Constrictive pericarditis"],
+  "cards:valvular-heart-disease": ["Aortic stenosis", "Mitral regurgitation", "Valvular heart disease"],
+  "cards:hyperlipidemia": ["Lipid disorders", "Statins", "Cardiovascular risk assessment"],
+  "cards:hypertension": ["Arterial hypertension", "Hypertensive crisis", "Secondary hypertension"],
+  "cards:peripheral-vascular-disease": ["Peripheral arterial disease", "Chronic venous insufficiency", "Ankle-brachial index"],
+  "cards:aortic-disease": ["Aortic dissection", "Abdominal aortic aneurysm", "Thoracic aortic aneurysm"],
 };
 
 /* ============================================================
@@ -595,29 +640,30 @@ function computeEngine(cur, state, today) {
   const finishedSections = Object.values(sectionDone).sort((a, b) => a.last.localeCompare(b.last));
   const recentSections = [];
 
+  // Pass 2 — every day, from exactly one week back: 2 questions per video studied.
+  plan.forEach((day) => {
+    if (day.type === "off" || day.isRandom) return;
+    const per = S.pass2PerVideo;
+    const back = dayVideos(addDays(day.key, -7));
+    if (!back.length) return;
+    day.pass2 = {
+      n: back.length * per,
+      per,
+      from: addDays(day.key, -7),
+      items: back.map((v) => ({
+        title: v.title,
+        qbank: v.qbank,
+        amboss: v.amboss,
+      })),
+      topics: back.map((v) => v.title),
+    };
+    back.forEach((v) => recentSections.includes(v.sectionName) || recentSections.push(v.sectionName));
+  });
+
   plan.forEach((day) => {
     if (!isWeekend(day.key) || day.type === "off" || day.isRandom) return;
     const k = day.key;
     const ph = day.phase;
-
-    // Pass 2 — the specific topics studied 5–7 days ago.
-    const recent = [];
-    for (let back = 5; back <= 7; back++) {
-      dayVideos(addDays(k, -back)).forEach((v) => {
-        if (!recent.some((x) => x.id === v.id)) recent.push(v);
-      });
-    }
-    const p2articles = [];
-    recent.forEach((v) => v.amboss.forEach((a) => p2articles.includes(a) || p2articles.push(a)));
-    const p2qbank = [];
-    recent.forEach((v) => p2qbank.includes(v.qbank) || p2qbank.push(v.qbank));
-    day.pass2 = {
-      n: Math.round(ph.pass2 / 2),
-      topics: recent.map((v) => v.title),
-      qbank: p2qbank,
-      articles: p2articles.slice(0, 6),
-    };
-    recent.forEach((v) => recentSections.includes(v.sectionName) || recentSections.push(v.sectionName));
 
     // Pass 3 — rotate the stalest finished systems so none goes untouched.
     const eligible = Object.values(sectionDone).filter((x) => x.last < k).sort((a, b) => a.last.localeCompare(b.last));
@@ -681,6 +727,7 @@ const DEFAULT_SETTINGS = {
   maxWeekdayUnits: 3,
   maxWeekendUnits: 6,
   maxSketchyPerDay: 4,
+  pass2PerVideo: 2,
   randomWorkdayQ: 12,
   randomWeekendQ: 25,
   cdmPerWeek: 3,
@@ -974,24 +1021,22 @@ function TodayView({ cur, state, en, today, update }) {
             </div>
           </Block>
 
-          {day.pass2 && day.pass2.n && day.pass2.topics.length ? (
+          {day.pass2 && day.pass2.n ? (
             <Block label="Recent mixed" note={day.pass2.n + " questions"}>
-              <div className="rounded border border-slate-800 bg-slate-900 p-3">
-                <div className="text-xs uppercase tracking-wider text-slate-500 mb-1">AMBOSS session</div>
-                {day.pass2.qbank.map((q) => (
-                  <div key={q} className="text-sm text-slate-300 font-mono">{q}</div>
-                ))}
-                <div className="text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">
-                  Filter to these topics — studied 5–7 days ago
-                </div>
-                <div className="text-sm text-slate-300 leading-relaxed">{day.pass2.topics.join(" · ")}</div>
-                {day.pass2.articles.length ? (
-                  <>
-                    <div className="text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">Re-read if shaky</div>
-                    <div className="text-sm text-slate-400 leading-relaxed">{day.pass2.articles.join(" · ")}</div>
-                  </>
-                ) : null}
+              <div className="text-xs text-slate-600 mb-2 font-mono">
+                from {fmtLong(day.pass2.from)} — one week back
               </div>
+              {day.pass2.items.map((it) => (
+                <div key={it.title} className="rounded border border-slate-800 bg-slate-900 p-3">
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-sm text-slate-200">{it.title}</span>
+                    <span className="font-mono text-xs text-cyan-300">{day.pass2.per} Q</span>
+                  </div>
+                  <div className="text-sm text-slate-400 font-mono">{it.qbank}</div>
+                  <div className="text-xs uppercase tracking-wider text-slate-500 mt-2 mb-1">Articles</div>
+                  <div className="text-sm text-slate-300 leading-relaxed">{it.amboss.join(" · ")}</div>
+                </div>
+              ))}
             </Block>
           ) : null}
 
@@ -1152,11 +1197,11 @@ function WeekView({ state, en, today, update, setTab }) {
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 pt-2 border-t border-slate-800 text-xs font-mono text-slate-500">
               <span>{day ? (day.isRandom ? day.pass1 + " random Q" : day.pass1Planned + " targeted Q") : "0 Q"}</span>
-              {day && day.pass2 && day.pass2.n ? <span>+{day.pass2.n} recent mixed</span> : null}
+              {day && day.pass2 && day.pass2.n ? <span>+{day.pass2.n} recent</span> : null}
               {day && day.pass3 && day.pass3.n ? <span>+{day.pass3.n} older systems</span> : null}
             </div>
-            {day && day.pass2 && day.pass2.n && day.pass2.topics.length ? (
-              <div className="text-xs text-slate-600 mt-1">recent: {day.pass2.topics.slice(0, 4).join(", ")}</div>
+            {day && day.pass2 && day.pass2.n ? (
+              <div className="text-xs text-slate-600 mt-1">recent: {day.pass2.topics.join(", ")}</div>
             ) : null}
             {day && day.pass3 && day.pass3.sources.length ? (
               <div className="text-xs text-slate-600 mt-1">older: {day.pass3.sources.join(", ")}</div>
@@ -1233,12 +1278,19 @@ function ProgressView({ cur, state, en, today }) {
   const ph = en.phase;
   const isRandom = ph.id === "random";
   const p1 = wkV * 3;
-  const qLo = isRandom ? 70 : p1 + ph.p2[0] + ph.p3[0];
-  const qHi = isRandom ? 100 : p1 + ph.p2[1] + ph.p3[1];
+  // Pass 2 this week = 2 questions per video studied the week before.
+  let prevV = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = state.days[addDays(wkStart, i - 7)];
+    if (d) prevV += (d.videosDone || []).length;
+  }
+  const p2 = prevV * state.settings.pass2PerVideo;
+  const qLo = isRandom ? 70 : p1 + p2 + ph.p3[0];
+  const qHi = isRandom ? 100 : p1 + p2 + ph.p3[1];
   const qBreak = isRandom
     ? "random across every completed system"
     : p1 + " targeted (" + wkV + " video" + (wkV === 1 ? "" : "s") + " done) + " +
-      ph.p2[0] + "\u2013" + ph.p2[1] + " recent + " + ph.p3[0] + "\u2013" + ph.p3[1] + " older";
+      p2 + " recent (" + prevV + " last week) + " + ph.p3[0] + "\u2013" + ph.p3[1] + " older";
 
   return (
     <div className="space-y-5">

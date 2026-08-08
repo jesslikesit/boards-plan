@@ -492,11 +492,16 @@ function phaseFor(key, state, videosLeft) {
    5. SCHEDULING ENGINE — schedule is never stored, only derived
    ============================================================ */
 
+function blockFor(key, settings) {
+  return (settings.blocks || []).find((b) => key >= b.start && key <= b.end) || null;
+}
+
 function baseCapacity(key, settings) {
   const g = parseKey(key).getDay();
-  if (g === 0) return settings.sunVideos;
-  if (g === 6) return settings.satVideos;
-  return settings.weekdayVideos;
+  const b = blockFor(key, settings);
+  if (g === 0) return b ? b.sun : settings.sunVideos;
+  if (g === 6) return b ? b.sat : settings.satVideos;
+  return b ? b.weekday : settings.weekdayVideos;
 }
 
 function dayType(key, state) {
@@ -511,6 +516,7 @@ function capacityFor(key, state) {
 
 function computeEngine(cur, state, today) {
   const S = state.settings;
+  const flags = state.flags || {};
   const pre = new Set(state.preCompleted || []);
   const doneByDay = {};
   const doneIds = new Set();
@@ -562,7 +568,9 @@ function computeEngine(cur, state, today) {
     for (let i = 0; i < W && (debt > 0 || spill > 0); i++) {
       if (targets[i] === 0) continue;
       const want = targets[i] + (debt * targets[i]) / wsum + spill;
-      const cap = isWeekend(keys[i]) ? S.maxWeekendUnits : S.maxWeekdayUnits;
+      // The cap limits how much catch-up piles on; it never reduces a day below
+      // what it was already set to (a heavy vacation day stays heavy).
+      const cap = Math.max(targets[i], isWeekend(keys[i]) ? S.maxWeekendUnits : S.maxWeekdayUnits);
       const give = Math.min(want, cap);
       spill = want - give;
       targets[i] = give;
@@ -621,6 +629,7 @@ function computeEngine(cur, state, today) {
 
     plan.push({
       key: k,
+      block: blockFor(k, S),
       isRandom,
       pass1Planned,
       videos: shown,
@@ -733,7 +742,11 @@ function computeEngine(cur, state, today) {
       detail: picks.map((x) => ({
         name: x.name,
         qbank: x.qbank,
-        topics: x.videos.slice(0, 3).map((v) => v.title),
+        // Anything flagged in this system leads; otherwise show a sample.
+        topics: (x.videos.filter((v) => flags[v.id]).map((v) => v.title).concat(
+          x.videos.filter((v) => !flags[v.id]).map((v) => v.title)
+        )).slice(0, 3),
+        weak: x.videos.filter((v) => flags[v.id]).map((v) => v.title),
       })),
     };
   });
@@ -745,6 +758,12 @@ function computeEngine(cur, state, today) {
     v.sketchy.forEach((sk) => strandedSketchy.push({ ...sk, from: v.title, section: v.sectionName }));
   });
 
+  // --- flagged topics, freshest first ---
+  const weakTopics = Object.keys(flags)
+    .map((id) => ({ ...flags[id], id, video: cur.byId[id] }))
+    .filter((x) => x.video)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
   // --- projections ---
   const projectedFinish = finishKey || (plan.length ? plan[plan.length - 1].key : today);
   const weeksToTarget = Math.max(0.2, daysBetween(today, S.targetFinishDate) / 7);
@@ -753,7 +772,7 @@ function computeEngine(cur, state, today) {
 
   return {
     doneIds, pre, doneByDay, remaining, remainingUnits, totalUnits, completedUnits,
-    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy,
+    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags,
     daysLeft: daysBetween(today, projectedFinish),
     finishedSections, recentSections,
     phase: plan.length ? plan[0].phase : phaseFor(today, state, 0),
@@ -768,7 +787,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 12 · Aug 8";
+const BUILD = "build 14 · Aug 8";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -858,6 +877,7 @@ const DEFAULT_SETTINGS = {
   minPerSketchy: 12,
   minPerQuestion: 2,
   phaseOverride: null,
+  blocks: [],
   sectionOrder: SECTIONS.map((s) => s.id),
 };
 
@@ -1006,6 +1026,7 @@ const inputCls =
 
 function TodayView({ cur, state, en, today, update }) {
   const nextUp = en.remaining[0];
+  const [flagging, setFlagging] = useState(null);
   const day = en.plan.find((d) => d.key === today) || en.plan[0];
   const log = state.days[today] || {};
   const doneV = new Set(log.videosDone || []);
@@ -1046,6 +1067,7 @@ function TodayView({ cur, state, en, today, update }) {
           <div className="font-mono text-sm text-slate-400 uppercase tracking-widest">{fmtLong(today)}</div>
           <div className="text-xs text-slate-600 mt-0.5">
             {day.phase.label} phase{day.minutes > S.dailyMinutesWarn ? " · heavy day" : ""}
+            {day.block ? <span className="text-cyan-500"> · {day.block.label}</span> : null}
           </div>
         </div>
         <div className="font-mono text-sm text-slate-500">{off ? "—" : day.minutes + " min"}</div>
@@ -1062,16 +1084,31 @@ function TodayView({ cur, state, en, today, update }) {
               <div className="text-sm text-slate-500 px-3 py-3">Nothing queued — the video list is finished.</div>
             ) : (
               shownVideos.map((v) => (
-                <Check
-                  key={v.id}
-                  on={doneV.has(v.id)}
-                  onClick={() => toggleV(v.id)}
-                  sub={v.hy ? v.sectionName + " · high yield" : v.sectionName}
-                >
-                  {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
-                  {v.title}
-                  {v.est !== 1 ? <span className="text-slate-500 font-mono text-xs"> · {v.est}u</span> : null}
-                </Check>
+                <div key={v.id} className="flex items-stretch gap-2">
+                  <div className="flex-1 min-w-0">
+                    <Check
+                      on={doneV.has(v.id)}
+                      onClick={() => toggleV(v.id)}
+                      sub={v.hy ? v.sectionName + " · high yield" : v.sectionName}
+                    >
+                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      {v.title}
+                      {v.est !== 1 ? <span className="text-slate-500 font-mono text-xs"> · {v.est}u</span> : null}
+                    </Check>
+                  </div>
+                  <button
+                    onClick={() => setFlagging(flagging === v.id ? null : v.id)}
+                    title="flag this as shaky"
+                    className={
+                      "shrink-0 w-11 rounded border text-lg " +
+                      (en.flags[v.id]
+                        ? "border-rose-800 bg-rose-950 text-rose-300"
+                        : "border-slate-800 bg-slate-900 text-slate-600 hover:text-rose-400")
+                    }
+                  >
+                    ⚑
+                  </button>
+                </div>
               ))
             )}
             {nextUp ? (
@@ -1099,6 +1136,44 @@ function TodayView({ cur, state, en, today, update }) {
                 );
               })}
           </Block>
+
+          {flagging ? (
+            <div className="rounded border border-rose-900 bg-rose-950 p-3">
+              <div className="text-sm text-rose-200 mb-2">
+                {(cur.byId[flagging] || {}).title}
+              </div>
+              <input
+                value={(en.flags[flagging] || {}).note || ""}
+                onChange={(e) =>
+                  update((st2) => {
+                    st2.flags = st2.flags || {};
+                    st2.flags[flagging] = { note: e.target.value, date: today };
+                  })
+                }
+                placeholder="what tripped you up? e.g. missed the FENa cutoff"
+                className="w-full bg-slate-950 border border-rose-900 rounded px-2 py-2 text-sm text-slate-100 focus:border-rose-600 focus:outline-none"
+              />
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => setFlagging(null)}
+                  className="flex-1 py-2 rounded border border-rose-800 text-sm text-rose-200"
+                >
+                  done
+                </button>
+                {en.flags[flagging] ? (
+                  <button
+                    onClick={() => {
+                      update((st2) => { if (st2.flags) delete st2.flags[flagging]; });
+                      setFlagging(null);
+                    }}
+                    className="px-4 py-2 rounded border border-slate-700 text-sm text-slate-400"
+                  >
+                    unflag
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <Block
             label={day.isRandom ? "Random questions" : "Questions"}
@@ -1193,6 +1268,32 @@ function TodayView({ cur, state, en, today, update }) {
         </Block>
       ) : null}
 
+      {!off && en.weakTopics.length ? (
+        <Block label="Flagged as shaky" note={en.weakTopics.length + " topics"}>
+          {en.weakTopics.slice(0, 6).map((w) => (
+            <div key={w.id} className="rounded border border-slate-800 bg-slate-900 p-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm text-slate-200">
+                  {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                  {w.video.title}
+                </span>
+                <button
+                  onClick={() => update((st2) => { if (st2.flags) delete st2.flags[w.id]; })}
+                  className="text-xs text-slate-600 hover:text-emerald-400 shrink-0"
+                >
+                  got it
+                </button>
+              </div>
+              {w.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{w.note}</div> : null}
+              <div className="text-xs text-slate-500 mt-1 leading-relaxed">{w.video.amboss.join(" · ")}</div>
+            </div>
+          ))}
+          {en.weakTopics.length > 6 ? (
+            <div className="text-xs text-slate-600 px-1">+{en.weakTopics.length - 6} more</div>
+          ) : null}
+        </Block>
+      ) : null}
+
       <div className="pt-2">
         <button
           onClick={() => setDay({ type: off ? "normal" : "off" })}
@@ -1276,7 +1377,7 @@ function WeekView({ state, en, today, update, setTab }) {
                 {isToday ? " ·  today" : ""}
               </span>
               <span className="font-mono text-xs text-slate-600">
-                {type === "off" ? "off" : day ? day.minutes + "m" : "—"}
+                {type === "off" ? "off" : day ? (day.block ? day.block.label + " · " : "") + day.minutes + "m" : "—"}
               </span>
             </div>
 
@@ -1484,6 +1585,24 @@ function ProgressView({ cur, state, en, today }) {
         </div>
       </div>
 
+      {en.weakTopics.length ? (
+        <div>
+          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Flagged as shaky</div>
+          <div className="rounded border border-slate-800 bg-slate-900 divide-y divide-slate-800">
+            {en.weakTopics.map((w) => (
+              <div key={w.id} className="p-3">
+                <div className="text-sm text-slate-200">
+                  {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                  {w.video.title}
+                  <span className="text-xs text-slate-600 font-mono ml-2">{w.video.sectionName}</span>
+                </div>
+                {w.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{w.note}</div> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div>
         <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Sections</div>
         <div className="space-y-2">
@@ -1589,6 +1708,98 @@ function SetupView({ cur, state, en, update, reload }) {
           <Field label="Catch-up window (days)"><input type="number" value={S.catchUpWindowDays} onChange={(e) => set("catchUpWindowDays", +e.target.value)} className={inputCls} /></Field>
           <Field label="Max weekday videos"><input type="number" value={S.maxWeekdayUnits} onChange={(e) => set("maxWeekdayUnits", +e.target.value)} className={inputCls} /></Field>
           <Field label="Heavy-day warning (min)"><input type="number" value={S.dailyMinutesWarn} onChange={(e) => set("dailyMinutesWarn", +e.target.value)} className={inputCls} /></Field>
+        </div>
+      </Group>
+
+      <Group title="Rotation blocks">
+        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+          Change the pace for a stretch. Nights and inpatient lighten the load; vacation
+          raises it, since the days are free. The finish date updates as soon as you add one.
+        </p>
+        {(S.blocks || []).map((b, i) => (
+          <div key={b.id} className="rounded border border-slate-800 bg-slate-900 p-3 mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                value={b.label}
+                onChange={(e) => update((st2) => { st2.settings.blocks[i].label = e.target.value; })}
+                className={inputCls + " flex-1"}
+              />
+              <button
+                onClick={() => update((st2) => { st2.settings.blocks.splice(i, 1); })}
+                className="px-3 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:border-rose-800 hover:text-rose-400"
+              >
+                remove
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="From">
+                <input type="date" value={b.start}
+                  onChange={(e) => update((st2) => { st2.settings.blocks[i].start = e.target.value; })}
+                  className={inputCls} />
+              </Field>
+              <Field label="To">
+                <input type="date" value={b.end}
+                  onChange={(e) => update((st2) => { st2.settings.blocks[i].end = e.target.value; })}
+                  className={inputCls} />
+              </Field>
+            </div>
+            <div className="text-xs text-slate-500 mb-1">
+              {b.weekday * 5 + b.sat + b.sun} videos/week during this block
+              <span className="text-slate-600">
+                {" "}vs {S.weekdayVideos * 5 + S.satVideos + S.sunVideos} normally
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Field label="Weekday">
+                <input type="number" step="1" min="0" value={b.weekday}
+                  onChange={(e) => update((st2) => { st2.settings.blocks[i].weekday = +e.target.value; })}
+                  className={inputCls} />
+              </Field>
+              <Field label="Sat">
+                <input type="number" step="1" min="0" value={b.sat}
+                  onChange={(e) => update((st2) => { st2.settings.blocks[i].sat = +e.target.value; })}
+                  className={inputCls} />
+              </Field>
+              <Field label="Sun">
+                <input type="number" step="1" min="0" value={b.sun}
+                  onChange={(e) => update((st2) => { st2.settings.blocks[i].sun = +e.target.value; })}
+                  className={inputCls} />
+              </Field>
+            </div>
+          </div>
+        ))}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: "Nights", weekday: 0, sat: 1, sun: 1 },
+            { label: "Inpatient", weekday: 1, sat: 1, sun: 2 },
+            { label: "Vacation", weekday: 4, sat: 4, sun: 4 },
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              onClick={() =>
+                update((st2) => {
+                  st2.settings.blocks = st2.settings.blocks || [];
+                  const start = dayKey(new Date());
+                  st2.settings.blocks.push({
+                    id: "b" + Date.now() + Math.random().toString(36).slice(2, 6),
+                    label: preset.label,
+                    start,
+                    end: addDays(start, 27),
+                    weekday: preset.weekday,
+                    sat: preset.sat,
+                    sun: preset.sun,
+                  });
+                })
+              }
+              className="py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-cyan-600"
+            >
+              + {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="rounded border border-slate-800 bg-slate-950 p-3 mt-3 font-mono text-xs text-slate-400 leading-relaxed">
+          finishing {fmtFinish(en.projectedFinish)}
+          {(S.blocks || []).length ? " with these blocks applied" : " — no blocks set"}
         </div>
       </Group>
 

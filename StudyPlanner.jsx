@@ -121,7 +121,8 @@ const HIGH_YIELD = {
         "Diagnostic Tests", "Bias", "Clinical Trials", "Evidence Based Medicine"],
   behav: ["Informed Consent", "Decision-Making Capacity", "Confidentiality", "Quality", "Safety", "Public Health"],
   cards: ["ACLS and Tachycardias", "Atrial Fibrillation and Flutter", "Bradycardia", "STEMI",
-          "Heart Failure I", "Heart Failure II", "Hypertension", "Valvular Heart Disease", "Aortic Disease"],
+          "Heart Failure I", "Heart Failure II", "Hypertension", "Valvular Heart Disease",
+          "Aortic Disease", "Hyperlipidemia"],
   pulm: ["Shock", "Respiratory Failure", "Sepsis ARDS", "DVT and Pulmonary Embolism",
          "Asthma", "COPD Treatment", "Pneumonia"],
   neuro: ["Stroke I", "Stroke II", "Intracranial Bleeding", "Seizures", "Seizure Treatment",
@@ -129,9 +130,11 @@ const HIGH_YIELD = {
   renal: ["Acute Renal Failure", "Fluids", "Hyponatremia", "Hypernatremia", "Potassium Disorders",
           "Acid Base Principles", "Metabolic Acidosis", "Metabolic Alkalosis"],
   obgyn: ["Prenatal Care", "Ectopic Pregnancy", "Intrapartum Fetal Monitoring",
-          "Labor and Delivery Complications", "Hypertension in Pregnancy", "Postpartum"],
+          "Labor and Delivery Complications", "Hypertension in Pregnancy", "Postpartum",
+          "Contraception", "Abnormal Uterine Bleeding"],
   peds: ["Delivery Room Care", "Newborn Nursery", "Newborn Hyperbilirubinemia",
-         "Ear Infections and Fevers", "Vaccination", "Developmental Milestones", "Child Abuse"],
+         "Ear Infections and Fevers", "Vaccination", "Developmental Milestones", "Child Abuse",
+         "Pediatric Screening", "General Pediatrics"],
   em: ["Chest Pain and Dyspnea", "Toxicology", "Trauma Basics", "Chest Trauma", "Abdominal Trauma", "Burns"],
   gi: ["Gastrointestinal Bleeding", "Cirrhosis", "Pancreatitis", "Gallstone Disease",
        "Biliary Disease", "Diarrhea"],
@@ -141,6 +144,8 @@ const HIGH_YIELD = {
   psych: ["Depression", "Mania", "Psychotic Disorders", "Alcohol Use Disorder",
           "Substance Abuse I", "Substance Abuse II", "Antidepressants", "Antipsychotics"],
   heme: ["Blood Products", "Thrombocytopenia", "Coagulopathy", "Anticoagulants", "Hypercoagulable States"],
+  msk: ["Low Back Pain", "Gout", "Arthritis I", "Arthritis II"],
+  endo: ["Diabetes Mellitus", "Diabetes Complications", "Diabetes Treatment"],
   surg: ["Pre-operative Evaluation", "Post-operative Complications", "General Anesthesia"],
 };
 
@@ -677,7 +682,11 @@ function computeEngine(cur, state, today) {
     if (complete) sectionDone[sec.id] = { name: sec.name, qbank: sec.qbank, last, videos: sec.videos };
   });
 
-  const finishedSections = Object.values(sectionDone).sort((a, b) => a.last.localeCompare(b.last));
+  // "Finished" means finished by now — a section whose last video is merely
+  // scheduled is not yet eligible for older-system review.
+  const finishedSections = Object.values(sectionDone)
+    .filter((x) => x.last <= today)
+    .sort((a, b) => a.last.localeCompare(b.last));
   const recentSections = [];
 
   // Pass 2 — every day, from exactly one week back: 2 questions per video studied.
@@ -848,55 +857,38 @@ const DEFAULT_SETTINGS = {
   sectionOrder: SECTIONS.map((s) => s.id),
 };
 
-/* Pulmonary, as actually studied. Dated so the one-week lookback that feeds
-   Pass 2 has real material to draw on. */
-const SEED_LOG = {
-  "2026-07-20": ["Asthma"],
-  "2026-07-21": ["COPD Diagnosis"],
-  "2026-07-22": ["COPD Treatment"],
-  "2026-07-23": ["Restrictive Lung Disease"],
-  "2026-07-24": ["Pneumonia"],
-  "2026-07-25": ["Lung Cancer", "Bronchiectasis", "Shock"],
-  "2026-07-26": ["Respiratory Failure", "Sepsis ARDS"],
-  "2026-07-27": ["Pulmonary Hypertension"],
-  "2026-07-28": ["DVT and Pulmonary Embolism"],
-  "2026-07-29": ["Pleural Disease"],
-};
-const SEED_DAYS = Object.fromEntries(
-  Object.entries(SEED_LOG).map(([k, titles]) => [
-    k,
-    { type: "normal", videosDone: titles.map((t) => vid("pulm", t)) },
-  ])
-);
-const SEED_DATED = new Set(Object.values(SEED_DAYS).flatMap((d) => d.videosDone));
+/* Jess's log as of Aug 8 2026, restored from her export. This is the baseline
+   the app ships with; the v4 migration below installs it over any older state. */
+const RESTORE = {"version":4,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"sectionOrder":["pulm","renal","gi","id","cards","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":[]}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{}};
 
-/* Finished, but with no date on record — all of Endocrinology, plus PFTs,
-   which predates the log above. These still feed the older-systems rotation. */
-const SEED_DONE = []
-  .concat(SECTIONS.find((s) => s.id === "endo").videos.map((t) => vid("endo", t)))
-  .concat([vid("pulm", "Pulmonary Function Tests")]);
-
-const freshState = () => ({
-  version: 3,
-  settings: { ...DEFAULT_SETTINGS },
-  days: JSON.parse(JSON.stringify(SEED_DAYS)),
-  preCompleted: SEED_DONE.slice(),
-  extraVideos: {},
-});
+const freshState = () => JSON.parse(JSON.stringify(RESTORE));
 
 function migrate(parsed) {
   parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
   parsed.days = parsed.days || {};
   parsed.preCompleted = parsed.preCompleted || [];
   parsed.extraVideos = parsed.extraVideos || {};
-  if (!parsed.version || parsed.version < 3) {
-    parsed.preCompleted = Array.from(
-      new Set(parsed.preCompleted.filter((id) => !SEED_DATED.has(id)).concat(SEED_DONE))
-    );
-    Object.keys(SEED_DAYS).forEach((k) => {
-      if (!parsed.days[k]) parsed.days[k] = JSON.parse(JSON.stringify(SEED_DAYS[k]));
+
+  if (!parsed.version || parsed.version < 4) {
+    // Install the restored baseline, keeping anything logged since the export.
+    const base = JSON.parse(JSON.stringify(RESTORE));
+    Object.keys(parsed.days).forEach((k) => {
+      const existing = parsed.days[k];
+      const hasWork =
+        (existing.videosDone && existing.videosDone.length) ||
+        existing.questionsDone ||
+        existing.type === "off" ||
+        (existing.sketchyDone && existing.sketchyDone.length);
+      if (!base.days[k] && hasWork) base.days[k] = existing;
     });
-    parsed.version = 3;
+    base.preCompleted = Array.from(new Set(base.preCompleted.concat(parsed.preCompleted)));
+    base.extraVideos = { ...parsed.extraVideos, ...base.extraVideos };
+    // A video logged on a date shouldn't also sit in the undated pile.
+    const dated = new Set(
+      Object.values(base.days).flatMap((d) => d.videosDone || [])
+    );
+    base.preCompleted = base.preCompleted.filter((id) => !dated.has(id));
+    return base;
   }
   return parsed;
 }
@@ -1546,6 +1538,7 @@ function SetupView({ cur, state, en, update, reload }) {
   const [addText, setAddText] = useState("");
   const [openSec, setOpenSec] = useState(null);
   const [io, setIo] = useState("");
+  const [note, setNote] = useState("");
 
   const set = (k, v) => update((s) => { s.settings[k] = v; });
 
@@ -1635,59 +1628,83 @@ function SetupView({ cur, state, en, update, reload }) {
 
       <Group title="Mark what's already done">
         <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-          Videos checked here count as finished but don't count toward your pace — use this for anything completed before the start date.
+          Videos you logged on a date show that date and are edited from Today or Week.
+          Checking one here marks it finished with no date — for anything done before you
+          started tracking.
         </p>
         <div className="space-y-1">
           {cur.sections.filter((s) => s.videos.length).map((s) => {
             const open = openSec === s.id;
-            const n = s.videos.filter((v) => (state.preCompleted || []).includes(v.id)).length;
+            const isDated = (id) => !!en.doneByDay[id];
+            const isDone = (id) => isDated(id) || (state.preCompleted || []).includes(id);
+            const n = s.videos.filter((v) => isDone(v.id)).length;
+            const undatedIds = s.videos.filter((v) => !isDated(v.id)).map((v) => v.id);
+            const allUndatedDone =
+              undatedIds.length > 0 && undatedIds.every((id) => (state.preCompleted || []).includes(id));
             return (
               <div key={s.id} className="rounded border border-slate-800 bg-slate-900">
                 <button onClick={() => setOpenSec(open ? null : s.id)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
                   <span className="flex-1 text-sm text-slate-300">{s.name}</span>
-                  <span className="font-mono text-xs text-slate-600">{n}/{s.videos.length}</span>
+                  <span className={"font-mono text-xs " + (n === s.videos.length ? "text-emerald-400" : "text-slate-600")}>
+                    {n}/{s.videos.length}
+                  </span>
                   <span className="text-slate-600">{open ? "−" : "+"}</span>
                 </button>
                 {open ? (
                   <div className="px-3 pb-3 space-y-1 border-t border-slate-800 pt-2">
-                    <button
-                      onClick={() => update((st2) => {
-                        const ids = s.videos.map((v) => v.id);
-                        const all = ids.every((id) => (st2.preCompleted || []).includes(id));
-                        st2.preCompleted = all
-                          ? (st2.preCompleted || []).filter((id) => !ids.includes(id))
-                          : Array.from(new Set((st2.preCompleted || []).concat(ids)));
-                      })}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 mb-1"
-                    >
-                      {n === s.videos.length ? "clear this whole section" : "mark whole section done"}
-                    </button>
+                    {undatedIds.length ? (
+                      <button
+                        onClick={() => update((st2) => {
+                          st2.preCompleted = allUndatedDone
+                            ? (st2.preCompleted || []).filter((id) => !undatedIds.includes(id))
+                            : Array.from(new Set((st2.preCompleted || []).concat(undatedIds)));
+                        })}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 mb-1"
+                      >
+                        {allUndatedDone ? "clear the undated ones" : "mark the rest done"}
+                      </button>
+                    ) : (
+                      <div className="text-xs text-slate-600 mb-1">every video here is logged on a date</div>
+                    )}
                     {s.videos.map((v) => {
-                      const on = (state.preCompleted || []).includes(v.id);
+                      const dated = isDated(v.id);
+                      const on = isDone(v.id);
                       return (
                         <div key={v.id} className="flex items-center gap-2">
                           <button
+                            disabled={dated}
                             onClick={() => update((st2) => {
                               const p = new Set(st2.preCompleted || []);
                               p.has(v.id) ? p.delete(v.id) : p.add(v.id);
                               st2.preCompleted = Array.from(p);
                             })}
                             className={"w-4 h-4 shrink-0 rounded-sm border text-xs leading-none flex items-center justify-center " +
-                              (on ? "border-emerald-500 bg-emerald-500 text-emerald-950" : "border-slate-600 text-transparent")}
+                              (dated
+                                ? "border-emerald-700 bg-emerald-700 text-emerald-950 cursor-default"
+                                : on
+                                ? "border-emerald-500 bg-emerald-500 text-emerald-950"
+                                : "border-slate-600 text-transparent")}
                           >✓</button>
                           <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>
                             {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                             {v.title}
                           </span>
-                          <button
-                            onClick={() => update((st2) => {
-                              const idx = cur.flat.findIndex((x) => x.id === v.id);
-                              const upto = cur.flat.slice(0, idx + 1).map((x) => x.id);
-                              st2.preCompleted = Array.from(new Set((st2.preCompleted || []).concat(upto)));
-                            })}
-                            className="text-xs text-slate-600 hover:text-cyan-300 shrink-0"
-                            title="mark this and everything before it as done"
-                          >through here</button>
+                          {dated ? (
+                            <span className="text-xs text-slate-600 font-mono shrink-0">{fmtShort(en.doneByDay[v.id])}</span>
+                          ) : (
+                            <button
+                              onClick={() => update((st2) => {
+                                const idx = cur.flat.findIndex((x) => x.id === v.id);
+                                const upto = cur.flat
+                                  .slice(0, idx + 1)
+                                  .map((x) => x.id)
+                                  .filter((id) => !en.doneByDay[id]);
+                                st2.preCompleted = Array.from(new Set((st2.preCompleted || []).concat(upto)));
+                              })}
+                              className="text-xs text-slate-600 hover:text-cyan-300 shrink-0"
+                              title="mark this and everything before it as done"
+                            >through here</button>
+                          )}
                         </div>
                       );
                     })}
@@ -1700,25 +1717,82 @@ function SetupView({ cur, state, en, update, reload }) {
       </Group>
 
       <Group title="Backup">
-        <button
-          onClick={() => setIo(JSON.stringify(state))}
-          className="w-full py-2 mb-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-        >
-          Export to the box below
-        </button>
-        <textarea value={io} onChange={(e) => setIo(e.target.value)} rows={3} placeholder="paste a backup here to restore" className={inputCls + " resize-y"} />
-        <button
-          onClick={() => {
-            try {
-              const p = JSON.parse(io);
-              if (p && p.settings) { reload(p); setIo("restored"); }
-              else setIo("that backup is missing its settings");
-            } catch (e) { setIo("that wasn't valid backup text"); }
-          }}
-          className="mt-2 w-full py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-        >
-          Restore from the box
-        </button>
+        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+          Copy this somewhere safe before reinstalling the app.
+        </p>
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={() => { setIo(JSON.stringify(state)); setNote(""); }}
+            className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
+          >
+            Export
+          </button>
+          <button
+            onClick={async () => {
+              const text = io && io.charAt(0) === "{" ? io : JSON.stringify(state);
+              setIo(text);
+              try {
+                await navigator.clipboard.writeText(text);
+                setNote("Copied " + text.length + " characters to the clipboard.");
+              } catch (e) {
+                setNote("Couldn't reach the clipboard — tap in the box, select all, copy.");
+              }
+            }}
+            className="flex-1 py-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600"
+          >
+            Copy
+          </button>
+        </div>
+        <textarea
+          value={io}
+          onChange={(e) => { setIo(e.target.value); setNote(""); }}
+          rows={8}
+          placeholder="paste a backup here, then tap Restore"
+          className={inputCls + " resize-y text-xs"}
+        />
+        <div className="flex gap-2 mt-2">
+          <button
+            onClick={async () => {
+              try {
+                const t = await navigator.clipboard.readText();
+                setIo(t);
+                setNote("Pasted " + t.length + " characters. Now tap Restore.");
+              } catch (e) {
+                setNote("Couldn't read the clipboard — long-press the box and paste manually.");
+              }
+            }}
+            className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
+          >
+            Paste
+          </button>
+          <button
+            onClick={() => {
+              const t = (io || "").trim();
+              if (!t) return setNote("The box is empty — paste a backup first.");
+              if (t.charAt(0) !== "{") return setNote("That doesn't look like a backup; it should start with {.");
+              if (t.charAt(t.length - 1) !== "}") {
+                return setNote("The backup is cut off — it should end with }. Copy the whole thing and try again.");
+              }
+              let p;
+              try {
+                p = JSON.parse(t);
+              } catch (e) {
+                return setNote("Couldn't read that: " + e.message);
+              }
+              if (!p || !p.settings) return setNote("That backup has no settings in it.");
+              const days = p.days ? Object.keys(p.days).length : 0;
+              const done = p.days
+                ? Object.values(p.days).reduce((a, d) => a + ((d.videosDone || []).length), 0)
+                : 0;
+              reload(migrate(p));
+              setNote("Restored " + days + " logged days and " + done + " completed videos.");
+            }}
+            className="flex-1 py-2 rounded border border-emerald-800 bg-emerald-950 text-emerald-200 text-sm hover:border-emerald-600"
+          >
+            Restore
+          </button>
+        </div>
+        {note ? <div className="text-xs text-slate-400 mt-2 leading-relaxed">{note}</div> : null}
         <button
           onClick={() => { if (confirm("Erase all logged progress?")) reload(freshState()); }}
           className="mt-4 w-full py-2 rounded border border-slate-800 text-sm text-slate-600 hover:border-slate-700"

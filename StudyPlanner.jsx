@@ -766,6 +766,10 @@ function computeEngine(cur, state, today) {
 
 const KEY = "bnb-planner:state:v1";
 
+/* Bumped on every change. If the footer doesn't show this, the phone is running
+   an older bundle than the one you uploaded. */
+const BUILD = "build 12 · Aug 8";
+
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
    verified with a real write, so a backend that exists but doesn't work is
@@ -1996,6 +2000,7 @@ export default function StudyPlanner() {
 
         <div className="mt-8 pt-4 border-t border-slate-800 font-mono text-xs text-slate-700 text-center">
           {en.completedUnits.toFixed(0)} / {en.totalUnits.toFixed(0)} units · {en.phase.label}
+          <div className="mt-1 text-slate-600">{BUILD}</div>
         </div>
       </div>
     </div>

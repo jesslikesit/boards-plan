@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Preferences } from "@capacitor/preferences";
 
 /* ============================================================
    1. CURRICULUM DATA
@@ -114,6 +113,46 @@ const SECTIONS = [
 
 const slug = (s) => s.toLowerCase().replace(/['’.,]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const vid = (sectionId, title) => sectionId + ":" + slug(title);
+
+/* High-yield videos for Level 3, by priority area. Titles must match SECTIONS
+   exactly — validated at build time by scripts/check-high-yield. */
+const HIGH_YIELD = {
+  epi: ["Study Designs", "Risk Quantification", "Sensitivity and Specificity", "Predictive Values",
+        "Diagnostic Tests", "Bias", "Clinical Trials", "Evidence Based Medicine"],
+  behav: ["Informed Consent", "Decision-Making Capacity", "Confidentiality", "Quality", "Safety", "Public Health"],
+  cards: ["ACLS and Tachycardias", "Atrial Fibrillation and Flutter", "Bradycardia", "STEMI",
+          "Heart Failure I", "Heart Failure II", "Hypertension", "Valvular Heart Disease", "Aortic Disease"],
+  pulm: ["Shock", "Respiratory Failure", "Sepsis ARDS", "DVT and Pulmonary Embolism",
+         "Asthma", "COPD Treatment", "Pneumonia"],
+  neuro: ["Stroke I", "Stroke II", "Intracranial Bleeding", "Seizures", "Seizure Treatment",
+          "Altered Mental Status", "Syncope", "Headache"],
+  renal: ["Acute Renal Failure", "Fluids", "Hyponatremia", "Hypernatremia", "Potassium Disorders",
+          "Acid Base Principles", "Metabolic Acidosis", "Metabolic Alkalosis"],
+  obgyn: ["Prenatal Care", "Ectopic Pregnancy", "Intrapartum Fetal Monitoring",
+          "Labor and Delivery Complications", "Hypertension in Pregnancy", "Postpartum"],
+  peds: ["Delivery Room Care", "Newborn Nursery", "Newborn Hyperbilirubinemia",
+         "Ear Infections and Fevers", "Vaccination", "Developmental Milestones", "Child Abuse"],
+  em: ["Chest Pain and Dyspnea", "Toxicology", "Trauma Basics", "Chest Trauma", "Abdominal Trauma", "Burns"],
+  gi: ["Gastrointestinal Bleeding", "Cirrhosis", "Pancreatitis", "Gallstone Disease",
+       "Biliary Disease", "Diarrhea"],
+  id: ["Penicillins", "Beta Lactams", "Protein Synthesis Inhibitors", "Other Antibiotics",
+       "Meningitis", "Adult Vaccinations", "HIV Infection", "HIV Drugs", "HIV Complications",
+       "Tuberculosis", "Sexually-transmitted Infections"],
+  psych: ["Depression", "Mania", "Psychotic Disorders", "Alcohol Use Disorder",
+          "Substance Abuse I", "Substance Abuse II", "Antidepressants", "Antipsychotics"],
+  heme: ["Blood Products", "Thrombocytopenia", "Coagulopathy", "Anticoagulants", "Hypercoagulable States"],
+  surg: ["Pre-operative Evaluation", "Post-operative Complications", "General Anesthesia"],
+};
+
+const HY = new Set(
+  Object.entries(HIGH_YIELD).flatMap(([sec, titles]) => titles.map((t) => vid(sec, t)))
+);
+
+const slugMissing = () => {
+  const real = new Set();
+  SECTIONS.forEach((s) => s.videos.forEach((t) => real.add(vid(s.id, t))));
+  return Array.from(HY).filter((id) => !real.has(id));
+};
 
 /* Workload weights. Everything defaults to 1 unit. */
 const EST = {
@@ -290,6 +329,51 @@ const AMBOSS = {
   "renal:urinary-tract-malignancy": ["Renal cell carcinoma", "Bladder cancer", "Prostate cancer"],
   "renal:diuretics": ["Diuretics", "Loop diuretics", "Thiazide diuretics"],
   "renal:rhabdomyolysis": ["Rhabdomyolysis", "Compartment syndrome"],
+
+  "gi:esophageal-disorders": ["Achalasia", "Esophageal motility disorders", "Eosinophilic esophagitis"],
+  "gi:gerd-and-esophageal-cancer": ["Gastroesophageal reflux disease", "Barrett esophagus", "Esophageal cancer"],
+  "gi:gastric-disorders": ["Peptic ulcer disease", "Gastritis", "Helicobacter pylori infection"],
+  "gi:gastric-cancer": ["Gastric cancer", "MALT lymphoma"],
+  "gi:liver-disease": ["Liver function tests", "Alcoholic liver disease", "Nonalcoholic fatty liver disease"],
+  "gi:liver-masses": ["Hepatocellular carcinoma", "Hepatic hemangioma", "Focal nodular hyperplasia"],
+  "gi:cirrhosis": ["Cirrhosis", "Portal hypertension", "Hepatic encephalopathy", "Ascites"],
+  "gi:viral-hepatitis": ["Viral hepatitis", "Hepatitis B", "Hepatitis C"],
+  "gi:hyperbilirubinemia": ["Jaundice", "Gilbert syndrome", "Bilirubin metabolism"],
+  "gi:wilsons-disease": ["Wilson disease"],
+  "gi:hemochromatosis": ["Hereditary hemochromatosis"],
+  "gi:biliary-disease": ["Cholangitis", "Primary biliary cholangitis", "Primary sclerosing cholangitis"],
+  "gi:gallstone-disease": ["Cholelithiasis", "Cholecystitis", "Choledocholithiasis"],
+  "gi:pancreatic-cancer": ["Pancreatic cancer"],
+  "gi:pancreatitis": ["Acute pancreatitis", "Chronic pancreatitis"],
+  "gi:colon-cancer": ["Colorectal cancer", "Colorectal cancer screening", "Hereditary colorectal cancer syndromes"],
+  "gi:colorectal-disease": ["Diverticular disease", "Hemorrhoids", "Anal fissure"],
+  "gi:small-bowel-disease": ["Small bowel obstruction", "Ileus", "Mesenteric ischemia"],
+  "gi:inflammatory-bowel-disease": ["Crohn disease", "Ulcerative colitis", "Inflammatory bowel disease"],
+  "gi:diarrhea": ["Diarrhea", "Clostridioides difficile infection", "Infectious gastroenteritis"],
+  "gi:gastrointestinal-bleeding": ["Upper gastrointestinal bleeding", "Lower gastrointestinal bleeding", "Variceal bleeding"],
+  "gi:hernias": ["Abdominal wall hernias", "Inguinal hernia"],
+  "gi:malabsorption": ["Celiac disease", "Malabsorption", "Lactose intolerance"],
+  "gi:gastrointestinal-pharmacology": ["Proton pump inhibitors", "Antiemetics", "Laxatives"],
+
+  "cards:ekg-interpretation": ["Electrocardiogram", "ECG interpretation", "Cardiac axis"],
+  "cards:acls-and-tachycardias": ["Advanced cardiac life support", "Supraventricular tachycardia", "Ventricular tachycardia"],
+  "cards:atrial-fibrillation-and-flutter": ["Atrial fibrillation", "Atrial flutter", "CHA2DS2-VASc score"],
+  "cards:bradycardia": ["Bradycardia", "Atrioventricular block", "Sick sinus syndrome"],
+  "cards:coronary-artery-disease": ["Coronary artery disease", "Stable angina", "Cardiac stress testing"],
+  "cards:stemi": ["Myocardial infarction", "Acute coronary syndrome", "STEMI management"],
+  "cards:heart-failure-i": ["Heart failure", "Systolic heart failure", "BNP"],
+  "cards:heart-failure-ii": ["Heart failure", "Acute decompensated heart failure", "Heart failure management"],
+  "cards:cardiomyopathy": ["Cardiomyopathy", "Hypertrophic cardiomyopathy", "Dilated cardiomyopathy"],
+  "cards:heart-murmurs": ["Heart murmurs", "Cardiac auscultation"],
+  "cards:heart-sounds": ["Heart sounds", "Cardiac auscultation"],
+  "cards:cardiovascular-pharmacology-i": ["Beta blockers", "ACE inhibitors", "Calcium channel blockers"],
+  "cards:cardiovascular-pharmacology-ii": ["Antiarrhythmic drugs", "Digoxin"],
+  "cards:pericardial-disease": ["Pericarditis", "Cardiac tamponade", "Constrictive pericarditis"],
+  "cards:valvular-heart-disease": ["Aortic stenosis", "Mitral regurgitation", "Valvular heart disease"],
+  "cards:hyperlipidemia": ["Lipid disorders", "Statins", "Cardiovascular risk assessment"],
+  "cards:hypertension": ["Arterial hypertension", "Hypertensive crisis", "Secondary hypertension"],
+  "cards:peripheral-vascular-disease": ["Peripheral arterial disease", "Chronic venous insufficiency", "Ankle-brachial index"],
+  "cards:aortic-disease": ["Aortic dissection", "Abdominal aortic aneurysm", "Thoracic aortic aneurysm"],
 };
 
 /* ============================================================
@@ -363,6 +447,7 @@ function buildCurriculum(state) {
             sectionName: s.name,
             qbank: s.qbank,
             est: EST[v] || 1,
+            hy: HY.has(v),
             sketchy: SKETCHY[v] || [],
             amboss: AMBOSS[v] || [title],
           };
@@ -595,29 +680,31 @@ function computeEngine(cur, state, today) {
   const finishedSections = Object.values(sectionDone).sort((a, b) => a.last.localeCompare(b.last));
   const recentSections = [];
 
+  // Pass 2 — every day, from exactly one week back: 2 questions per video studied.
+  plan.forEach((day) => {
+    if (day.type === "off" || day.isRandom) return;
+    const per = S.pass2PerVideo;
+    const back = dayVideos(addDays(day.key, -7));
+    if (!back.length) return;
+    day.pass2 = {
+      n: back.length * per,
+      per,
+      from: addDays(day.key, -7),
+      items: back.map((v) => ({
+        title: v.title,
+        qbank: v.qbank,
+        amboss: v.amboss,
+        hy: v.hy,
+      })),
+      topics: back.map((v) => v.title),
+    };
+    back.forEach((v) => recentSections.includes(v.sectionName) || recentSections.push(v.sectionName));
+  });
+
   plan.forEach((day) => {
     if (!isWeekend(day.key) || day.type === "off" || day.isRandom) return;
     const k = day.key;
     const ph = day.phase;
-
-    // Pass 2 — the specific topics studied 5–7 days ago.
-    const recent = [];
-    for (let back = 5; back <= 7; back++) {
-      dayVideos(addDays(k, -back)).forEach((v) => {
-        if (!recent.some((x) => x.id === v.id)) recent.push(v);
-      });
-    }
-    const p2articles = [];
-    recent.forEach((v) => v.amboss.forEach((a) => p2articles.includes(a) || p2articles.push(a)));
-    const p2qbank = [];
-    recent.forEach((v) => p2qbank.includes(v.qbank) || p2qbank.push(v.qbank));
-    day.pass2 = {
-      n: Math.round(ph.pass2 / 2),
-      topics: recent.map((v) => v.title),
-      qbank: p2qbank,
-      articles: p2articles.slice(0, 6),
-    };
-    recent.forEach((v) => recentSections.includes(v.sectionName) || recentSections.push(v.sectionName));
 
     // Pass 3 — rotate the stalest finished systems so none goes untouched.
     const eligible = Object.values(sectionDone).filter((x) => x.last < k).sort((a, b) => a.last.localeCompare(b.last));
@@ -670,6 +757,73 @@ function computeEngine(cur, state, today) {
 
 const KEY = "bnb-planner:state:v1";
 
+/* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
+   Claude artifact, localStorage anywhere else. Each backend is probed once and
+   verified with a real write, so a backend that exists but doesn't work is
+   skipped rather than silently swallowing every save. */
+let BACKEND = null;
+
+async function capPrefs() {
+  const C = typeof window !== "undefined" ? window.Capacitor : null;
+  if (!C || !C.Plugins || !C.Plugins.Preferences) return null;
+  const P = C.Plugins.Preferences;
+  return {
+    name: "Preferences",
+    get: async (k) => (await P.get({ key: k })).value,
+    set: async (k, v) => { await P.set({ key: k, value: v }); },
+  };
+}
+
+function artifactStore() {
+  if (typeof window === "undefined" || !window.storage) return null;
+  return {
+    name: "artifact",
+    get: async (k) => {
+      try {
+        const r = await window.storage.get(k);
+        return r && r.value ? r.value : null;
+      } catch (e) {
+        return null;
+      }
+    },
+    set: async (k, v) => { await window.storage.set(k, v); },
+  };
+}
+
+function localStore() {
+  if (typeof window === "undefined" || !window.localStorage) return null;
+  return {
+    name: "localStorage",
+    get: async (k) => window.localStorage.getItem(k),
+    set: async (k, v) => { window.localStorage.setItem(k, v); },
+  };
+}
+
+async function pickBackend() {
+  if (BACKEND) return BACKEND;
+  const probe = KEY + ":probe";
+  for (const make of [capPrefs, artifactStore, localStore]) {
+    let b = null;
+    try {
+      b = await make();
+    } catch (e) {
+      b = null;
+    }
+    if (!b) continue;
+    try {
+      await b.set(probe, "1");
+      const back = await b.get(probe);
+      if (back === "1") {
+        BACKEND = b;
+        return b;
+      }
+    } catch (e) {
+      /* try the next one */
+    }
+  }
+  return null;
+}
+
 const DEFAULT_SETTINGS = {
   startDate: dayKey(new Date()),
   targetFinishDate: "2026-12-31",
@@ -681,6 +835,7 @@ const DEFAULT_SETTINGS = {
   maxWeekdayUnits: 3,
   maxWeekendUnits: 6,
   maxSketchyPerDay: 4,
+  pass2PerVideo: 2,
   randomWorkdayQ: 12,
   randomWeekendQ: 25,
   cdmPerWeek: 3,
@@ -693,7 +848,7 @@ const DEFAULT_SETTINGS = {
   sectionOrder: SECTIONS.map((s) => s.id),
 };
 
-/* Pulmonary, as actually studied. Dated so the 5-7 day lookback that feeds
+/* Pulmonary, as actually studied. Dated so the one-week lookback that feeds
    Pass 2 has real material to draw on. */
 const SEED_LOG = {
   "2026-07-20": ["Asthma"],
@@ -729,37 +884,48 @@ const freshState = () => ({
   extraVideos: {},
 });
 
+function migrate(parsed) {
+  parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
+  parsed.days = parsed.days || {};
+  parsed.preCompleted = parsed.preCompleted || [];
+  parsed.extraVideos = parsed.extraVideos || {};
+  if (!parsed.version || parsed.version < 3) {
+    parsed.preCompleted = Array.from(
+      new Set(parsed.preCompleted.filter((id) => !SEED_DATED.has(id)).concat(SEED_DONE))
+    );
+    Object.keys(SEED_DAYS).forEach((k) => {
+      if (!parsed.days[k]) parsed.days[k] = JSON.parse(JSON.stringify(SEED_DAYS[k]));
+    });
+    parsed.version = 3;
+  }
+  return parsed;
+}
+
 async function loadState() {
+  const b = await pickBackend();
+  if (!b) return { state: null, error: "No storage backend available on this device." };
   try {
-    const { value } = await Preferences.get({ key: KEY });
-    if (!value) return null;
-    const parsed = JSON.parse(value);
-    parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
-    parsed.days = parsed.days || {};
-    parsed.preCompleted = parsed.preCompleted || [];
-    parsed.extraVideos = parsed.extraVideos || {};
-    if (!parsed.version || parsed.version < 3) {
-      // Pulmonary was previously seeded undated; move it onto real dates.
-      parsed.preCompleted = Array.from(
-        new Set(parsed.preCompleted.filter((id) => !SEED_DATED.has(id)).concat(SEED_DONE))
-      );
-      Object.keys(SEED_DAYS).forEach((k) => {
-        if (!parsed.days[k]) parsed.days[k] = JSON.parse(JSON.stringify(SEED_DAYS[k]));
-      });
-      parsed.version = 3;
-    }
-    return parsed;
+    const raw = await b.get(KEY);
+    if (!raw) return { state: null, error: null };
+    return { state: migrate(JSON.parse(raw)), error: null };
   } catch (e) {
-    return null;
+    return { state: null, error: "Could not read saved data: " + (e && e.message ? e.message : e) };
   }
 }
 
 async function saveState(s) {
+  const b = await pickBackend();
+  if (!b) return "No storage backend available on this device.";
   try {
-    await Preferences.set({ key: KEY, value: JSON.stringify(s) });
-    return true;
+    const payload = JSON.stringify(s);
+    await b.set(KEY, payload);
+    // Verify: a write that reports success but doesn't persist is the failure
+    // mode worth catching, so read it straight back.
+    const back = await b.get(KEY);
+    if (back !== payload) return "Write did not persist (" + b.name + ").";
+    return null;
   } catch (e) {
-    return false;
+    return (e && e.message ? e.message : String(e)) + " (" + b.name + ")";
   }
 }
 
@@ -900,7 +1066,13 @@ function TodayView({ cur, state, en, today, update }) {
               <div className="text-sm text-slate-500 px-3 py-3">Nothing queued — the video list is finished.</div>
             ) : (
               shownVideos.map((v) => (
-                <Check key={v.id} on={doneV.has(v.id)} onClick={() => toggleV(v.id)} sub={v.sectionName}>
+                <Check
+                  key={v.id}
+                  on={doneV.has(v.id)}
+                  onClick={() => toggleV(v.id)}
+                  sub={v.hy ? v.sectionName + " · high yield" : v.sectionName}
+                >
+                  {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                   {v.title}
                   {v.est !== 1 ? <span className="text-slate-500 font-mono text-xs"> · {v.est}u</span> : null}
                 </Check>
@@ -912,7 +1084,11 @@ function TodayView({ cur, state, en, today, update }) {
                 className="w-full text-left rounded border border-dashed border-slate-700 px-3 py-2.5 text-sm text-slate-400 hover:border-cyan-700 hover:text-cyan-300"
               >
                 <span className="font-mono text-xs text-slate-600 mr-2">+</span>
-                Watched an extra one — log <span className="text-slate-300">{nextUp.title}</span>
+                Watched an extra one — log{" "}
+                <span className="text-slate-300">
+                  {nextUp.hy ? <span className="text-amber-300">★ </span> : null}
+                  {nextUp.title}
+                </span>
               </button>
             ) : null}
             {day.sketchy.map((s, i) => {
@@ -974,24 +1150,25 @@ function TodayView({ cur, state, en, today, update }) {
             </div>
           </Block>
 
-          {day.pass2 && day.pass2.n && day.pass2.topics.length ? (
+          {day.pass2 && day.pass2.n ? (
             <Block label="Recent mixed" note={day.pass2.n + " questions"}>
-              <div className="rounded border border-slate-800 bg-slate-900 p-3">
-                <div className="text-xs uppercase tracking-wider text-slate-500 mb-1">AMBOSS session</div>
-                {day.pass2.qbank.map((q) => (
-                  <div key={q} className="text-sm text-slate-300 font-mono">{q}</div>
-                ))}
-                <div className="text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">
-                  Filter to these topics — studied 5–7 days ago
-                </div>
-                <div className="text-sm text-slate-300 leading-relaxed">{day.pass2.topics.join(" · ")}</div>
-                {day.pass2.articles.length ? (
-                  <>
-                    <div className="text-xs uppercase tracking-wider text-slate-500 mt-3 mb-1">Re-read if shaky</div>
-                    <div className="text-sm text-slate-400 leading-relaxed">{day.pass2.articles.join(" · ")}</div>
-                  </>
-                ) : null}
+              <div className="text-xs text-slate-600 mb-2 font-mono">
+                from {fmtLong(day.pass2.from)} — one week back
               </div>
+              {day.pass2.items.map((it) => (
+                <div key={it.title} className="rounded border border-slate-800 bg-slate-900 p-3">
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-sm text-slate-200">
+                      {it.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      {it.title}
+                    </span>
+                    <span className="font-mono text-xs text-cyan-300">{day.pass2.per} Q</span>
+                  </div>
+                  <div className="text-sm text-slate-400 font-mono">{it.qbank}</div>
+                  <div className="text-xs uppercase tracking-wider text-slate-500 mt-2 mb-1">Articles</div>
+                  <div className="text-sm text-slate-300 leading-relaxed">{it.amboss.join(" · ")}</div>
+                </div>
+              ))}
             </Block>
           ) : null}
 
@@ -1060,6 +1237,10 @@ function WeekView({ state, en, today, update, setTab }) {
   const start = addDays(today, offset * 7 - ((parseKey(today).getDay() + 6) % 7));
   const week = [];
   for (let i = 0; i < 7; i++) week.push(addDays(start, i));
+  const hyThisWeek = week.reduce((a, k) => {
+    const d = en.plan.find((x) => x.key === k);
+    return a + (d ? d.videos.filter((v) => v.hy).length : 0);
+  }, 0);
 
   return (
     <div className="space-y-3">
@@ -1069,6 +1250,7 @@ function WeekView({ state, en, today, update, setTab }) {
         </button>
         <span className="font-mono text-sm text-slate-400">
           {fmtShort(week[0])} – {fmtShort(week[6])}
+          {hyThisWeek ? <span className="text-amber-300 ml-2">★ {hyThisWeek}</span> : null}
         </span>
         <button onClick={() => setOffset(offset + 1)} className="px-3 py-1 text-slate-400 hover:text-cyan-300 font-mono">
           →
@@ -1132,6 +1314,7 @@ function WeekView({ state, en, today, update, setTab }) {
                       ✓
                     </button>
                     <span className={(log.videosDone || []).includes(v.id) ? "text-slate-600 line-through" : "text-slate-200"}>
+                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                       {v.title}
                     </span>
                   </div>
@@ -1152,11 +1335,11 @@ function WeekView({ state, en, today, update, setTab }) {
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 pt-2 border-t border-slate-800 text-xs font-mono text-slate-500">
               <span>{day ? (day.isRandom ? day.pass1 + " random Q" : day.pass1Planned + " targeted Q") : "0 Q"}</span>
-              {day && day.pass2 && day.pass2.n ? <span>+{day.pass2.n} recent mixed</span> : null}
+              {day && day.pass2 && day.pass2.n ? <span>+{day.pass2.n} recent</span> : null}
               {day && day.pass3 && day.pass3.n ? <span>+{day.pass3.n} older systems</span> : null}
             </div>
-            {day && day.pass2 && day.pass2.n && day.pass2.topics.length ? (
-              <div className="text-xs text-slate-600 mt-1">recent: {day.pass2.topics.slice(0, 4).join(", ")}</div>
+            {day && day.pass2 && day.pass2.n ? (
+              <div className="text-xs text-slate-600 mt-1">recent: {day.pass2.topics.join(", ")}</div>
             ) : null}
             {day && day.pass3 && day.pass3.sources.length ? (
               <div className="text-xs text-slate-600 mt-1">older: {day.pass3.sources.join(", ")}</div>
@@ -1233,12 +1416,23 @@ function ProgressView({ cur, state, en, today }) {
   const ph = en.phase;
   const isRandom = ph.id === "random";
   const p1 = wkV * 3;
-  const qLo = isRandom ? 70 : p1 + ph.p2[0] + ph.p3[0];
-  const qHi = isRandom ? 100 : p1 + ph.p2[1] + ph.p3[1];
+  // Pass 2 this week = 2 questions per video studied the week before.
+  let prevV = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = state.days[addDays(wkStart, i - 7)];
+    if (d) prevV += (d.videosDone || []).length;
+  }
+  const p2 = prevV * state.settings.pass2PerVideo;
+  const qLo = isRandom ? 70 : p1 + p2 + ph.p3[0];
+  const qHi = isRandom ? 100 : p1 + p2 + ph.p3[1];
+  const hyAll = cur.flat.filter((v) => v.hy);
+  const hyTotal = hyAll.length;
+  const hyDone = hyAll.filter((v) => en.doneIds.has(v.id) || en.pre.has(v.id)).length;
+  const hyLeft = hyTotal - hyDone;
   const qBreak = isRandom
     ? "random across every completed system"
     : p1 + " targeted (" + wkV + " video" + (wkV === 1 ? "" : "s") + " done) + " +
-      ph.p2[0] + "\u2013" + ph.p2[1] + " recent + " + ph.p3[0] + "\u2013" + ph.p3[1] + " older";
+      p2 + " recent (" + prevV + " last week) + " + ph.p3[0] + "\u2013" + ph.p3[1] + " older";
 
   return (
     <div className="space-y-5">
@@ -1274,6 +1468,27 @@ function ProgressView({ cur, state, en, today }) {
       </div>
 
       <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
+          High yield <span className="text-amber-300">★</span>
+        </div>
+        <div className="rounded border border-slate-800 bg-slate-900 p-3">
+          <div className="flex justify-between items-baseline mb-1">
+            <span className="text-sm text-slate-300">Starred videos watched</span>
+            <span className="font-mono text-sm">
+              <span className="text-amber-300">{hyDone}</span>
+              <span className="text-slate-600"> / {hyTotal}</span>
+            </span>
+          </div>
+          <Bar pct={hyTotal ? (hyDone / hyTotal) * 100 : 0} tone={hyDone === hyTotal ? "good" : "warn"} />
+          <div className="text-xs text-slate-500 mt-2 leading-relaxed">
+            {hyLeft === 0
+              ? "Every high-yield video is done."
+              : hyLeft + " left — the topics Level 3 leans on hardest."}
+          </div>
+        </div>
+      </div>
+
+      <div>
         <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Sections</div>
         <div className="space-y-2">
           {cur.sections.map((s) => {
@@ -1286,6 +1501,12 @@ function ProgressView({ cur, state, en, today }) {
                     {s.name}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
+                    {s.videos.filter((v) => v.hy).length ? (
+                      <span className="text-amber-300 mr-2">
+                        ★{s.videos.filter((v) => v.hy && (en.doneIds.has(v.id) || en.pre.has(v.id))).length}/
+                        {s.videos.filter((v) => v.hy).length}
+                      </span>
+                    ) : null}
                     {s.videos.length === 0 ? "no videos yet" : n + "/" + s.videos.length}
                   </span>
                 </div>
@@ -1454,7 +1675,10 @@ function SetupView({ cur, state, en, update, reload }) {
                             className={"w-4 h-4 shrink-0 rounded-sm border text-xs leading-none flex items-center justify-center " +
                               (on ? "border-emerald-500 bg-emerald-500 text-emerald-950" : "border-slate-600 text-transparent")}
                           >✓</button>
-                          <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>{v.title}</span>
+                          <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>
+                            {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                            {v.title}
+                          </span>
                           <button
                             onClick={() => update((st2) => {
                               const idx = cur.flat.findIndex((x) => x.id === v.id);
@@ -1484,7 +1708,13 @@ function SetupView({ cur, state, en, update, reload }) {
         </button>
         <textarea value={io} onChange={(e) => setIo(e.target.value)} rows={3} placeholder="paste a backup here to restore" className={inputCls + " resize-y"} />
         <button
-          onClick={() => { try { const p = JSON.parse(io); if (p && p.settings) reload(p); } catch (e) { setIo("that wasn't valid backup text"); } }}
+          onClick={() => {
+            try {
+              const p = JSON.parse(io);
+              if (p && p.settings) { reload(p); setIo("restored"); }
+              else setIo("that backup is missing its settings");
+            } catch (e) { setIo("that wasn't valid backup text"); }
+          }}
           className="mt-2 w-full py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
         >
           Restore from the box
@@ -1521,26 +1751,53 @@ export default function StudyPlanner() {
   const timer = useRef(null);
   const today = dayKey(new Date());
 
+  const latest = useRef(null);
+  const dirty = useRef(false);
+
   useEffect(() => {
     let live = true;
     (async () => {
-      const s = await loadState();
+      const { state: s, error } = await loadState();
       if (!live) return;
+      if (error) setSaveNote(error);
       setState(s || freshState());
       setLoading(false);
     })();
     return () => { live = false; };
   }, []);
 
+  const flush = async () => {
+    if (!latest.current || !dirty.current) return;
+    const err = await saveState(latest.current);
+    dirty.current = !!err;
+    setSaveNote(err || "");
+  };
+
   useEffect(() => {
     if (!state) return;
+    latest.current = state;
+    dirty.current = true;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(async () => {
-      const ok = await saveState(state);
-      if (!ok) setSaveNote("Not saving — export a backup from Setup before you close this.");
-    }, 500);
+    timer.current = setTimeout(flush, 400);
     return () => timer.current && clearTimeout(timer.current);
   }, [state]);
+
+  // Closing or backgrounding the app must not drop a pending write.
+  useEffect(() => {
+    const onHide = () => {
+      if (timer.current) clearTimeout(timer.current);
+      flush();
+    };
+    const onVis = () => { if (document.visibilityState === "hidden") onHide(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    window.addEventListener("beforeunload", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("beforeunload", onHide);
+    };
+  }, []);
 
   const update = (fn) =>
     setState((prev) => {
@@ -1601,7 +1858,14 @@ export default function StudyPlanner() {
         ) : null}
 
         {saveNote ? (
-          <div className="rounded border border-amber-800 bg-amber-950 px-3 py-2 mb-3 text-sm text-amber-200">{saveNote}</div>
+          <div className="rounded border border-amber-800 bg-amber-950 px-3 py-2 mb-3 text-sm text-amber-200">
+            <div className="font-medium">Not saving to this device</div>
+            <div className="text-xs mt-1 font-mono break-words">{saveNote}</div>
+            <div className="text-xs mt-2">
+              Export a backup from Setup before closing.{" "}
+              <button onClick={flush} className="underline hover:text-amber-100">retry</button>
+            </div>
+          </div>
         ) : null}
 
         {gapSections.length && tab !== "setup" ? (

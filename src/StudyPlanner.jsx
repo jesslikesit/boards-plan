@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Preferences } from "@capacitor/preferences";
 
 /* ============================================================
    1. CURRICULUM DATA
@@ -114,6 +113,46 @@ const SECTIONS = [
 
 const slug = (s) => s.toLowerCase().replace(/['’.,]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const vid = (sectionId, title) => sectionId + ":" + slug(title);
+
+/* High-yield videos for Level 3, by priority area. Titles must match SECTIONS
+   exactly — validated at build time by scripts/check-high-yield. */
+const HIGH_YIELD = {
+  epi: ["Study Designs", "Risk Quantification", "Sensitivity and Specificity", "Predictive Values",
+        "Diagnostic Tests", "Bias", "Clinical Trials", "Evidence Based Medicine"],
+  behav: ["Informed Consent", "Decision-Making Capacity", "Confidentiality", "Quality", "Safety", "Public Health"],
+  cards: ["ACLS and Tachycardias", "Atrial Fibrillation and Flutter", "Bradycardia", "STEMI",
+          "Heart Failure I", "Heart Failure II", "Hypertension", "Valvular Heart Disease", "Aortic Disease"],
+  pulm: ["Shock", "Respiratory Failure", "Sepsis ARDS", "DVT and Pulmonary Embolism",
+         "Asthma", "COPD Treatment", "Pneumonia"],
+  neuro: ["Stroke I", "Stroke II", "Intracranial Bleeding", "Seizures", "Seizure Treatment",
+          "Altered Mental Status", "Syncope", "Headache"],
+  renal: ["Acute Renal Failure", "Fluids", "Hyponatremia", "Hypernatremia", "Potassium Disorders",
+          "Acid Base Principles", "Metabolic Acidosis", "Metabolic Alkalosis"],
+  obgyn: ["Prenatal Care", "Ectopic Pregnancy", "Intrapartum Fetal Monitoring",
+          "Labor and Delivery Complications", "Hypertension in Pregnancy", "Postpartum"],
+  peds: ["Delivery Room Care", "Newborn Nursery", "Newborn Hyperbilirubinemia",
+         "Ear Infections and Fevers", "Vaccination", "Developmental Milestones", "Child Abuse"],
+  em: ["Chest Pain and Dyspnea", "Toxicology", "Trauma Basics", "Chest Trauma", "Abdominal Trauma", "Burns"],
+  gi: ["Gastrointestinal Bleeding", "Cirrhosis", "Pancreatitis", "Gallstone Disease",
+       "Biliary Disease", "Diarrhea"],
+  id: ["Penicillins", "Beta Lactams", "Protein Synthesis Inhibitors", "Other Antibiotics",
+       "Meningitis", "Adult Vaccinations", "HIV Infection", "HIV Drugs", "HIV Complications",
+       "Tuberculosis", "Sexually-transmitted Infections"],
+  psych: ["Depression", "Mania", "Psychotic Disorders", "Alcohol Use Disorder",
+          "Substance Abuse I", "Substance Abuse II", "Antidepressants", "Antipsychotics"],
+  heme: ["Blood Products", "Thrombocytopenia", "Coagulopathy", "Anticoagulants", "Hypercoagulable States"],
+  surg: ["Pre-operative Evaluation", "Post-operative Complications", "General Anesthesia"],
+};
+
+const HY = new Set(
+  Object.entries(HIGH_YIELD).flatMap(([sec, titles]) => titles.map((t) => vid(sec, t)))
+);
+
+const slugMissing = () => {
+  const real = new Set();
+  SECTIONS.forEach((s) => s.videos.forEach((t) => real.add(vid(s.id, t))));
+  return Array.from(HY).filter((id) => !real.has(id));
+};
 
 /* Workload weights. Everything defaults to 1 unit. */
 const EST = {
@@ -408,6 +447,7 @@ function buildCurriculum(state) {
             sectionName: s.name,
             qbank: s.qbank,
             est: EST[v] || 1,
+            hy: HY.has(v),
             sketchy: SKETCHY[v] || [],
             amboss: AMBOSS[v] || [title],
           };
@@ -654,6 +694,7 @@ function computeEngine(cur, state, today) {
         title: v.title,
         qbank: v.qbank,
         amboss: v.amboss,
+        hy: v.hy,
       })),
       topics: back.map((v) => v.title),
     };
@@ -778,9 +819,9 @@ const freshState = () => ({
 
 async function loadState() {
   try {
-    const { value } = await Preferences.get({ key: KEY });
-    if (!value) return null;
-    const parsed = JSON.parse(value);
+    const r = await window.storage.get(KEY);
+    if (!r || !r.value) return null;
+    const parsed = JSON.parse(r.value);
     parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
     parsed.days = parsed.days || {};
     parsed.preCompleted = parsed.preCompleted || [];
@@ -803,7 +844,7 @@ async function loadState() {
 
 async function saveState(s) {
   try {
-    await Preferences.set({ key: KEY, value: JSON.stringify(s) });
+    await window.storage.set(KEY, JSON.stringify(s));
     return true;
   } catch (e) {
     return false;
@@ -947,7 +988,13 @@ function TodayView({ cur, state, en, today, update }) {
               <div className="text-sm text-slate-500 px-3 py-3">Nothing queued — the video list is finished.</div>
             ) : (
               shownVideos.map((v) => (
-                <Check key={v.id} on={doneV.has(v.id)} onClick={() => toggleV(v.id)} sub={v.sectionName}>
+                <Check
+                  key={v.id}
+                  on={doneV.has(v.id)}
+                  onClick={() => toggleV(v.id)}
+                  sub={v.hy ? v.sectionName + " · high yield" : v.sectionName}
+                >
+                  {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                   {v.title}
                   {v.est !== 1 ? <span className="text-slate-500 font-mono text-xs"> · {v.est}u</span> : null}
                 </Check>
@@ -959,7 +1006,11 @@ function TodayView({ cur, state, en, today, update }) {
                 className="w-full text-left rounded border border-dashed border-slate-700 px-3 py-2.5 text-sm text-slate-400 hover:border-cyan-700 hover:text-cyan-300"
               >
                 <span className="font-mono text-xs text-slate-600 mr-2">+</span>
-                Watched an extra one — log <span className="text-slate-300">{nextUp.title}</span>
+                Watched an extra one — log{" "}
+                <span className="text-slate-300">
+                  {nextUp.hy ? <span className="text-amber-300">★ </span> : null}
+                  {nextUp.title}
+                </span>
               </button>
             ) : null}
             {day.sketchy.map((s, i) => {
@@ -1029,7 +1080,10 @@ function TodayView({ cur, state, en, today, update }) {
               {day.pass2.items.map((it) => (
                 <div key={it.title} className="rounded border border-slate-800 bg-slate-900 p-3">
                   <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-sm text-slate-200">{it.title}</span>
+                    <span className="text-sm text-slate-200">
+                      {it.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      {it.title}
+                    </span>
                     <span className="font-mono text-xs text-cyan-300">{day.pass2.per} Q</span>
                   </div>
                   <div className="text-sm text-slate-400 font-mono">{it.qbank}</div>
@@ -1105,6 +1159,10 @@ function WeekView({ state, en, today, update, setTab }) {
   const start = addDays(today, offset * 7 - ((parseKey(today).getDay() + 6) % 7));
   const week = [];
   for (let i = 0; i < 7; i++) week.push(addDays(start, i));
+  const hyThisWeek = week.reduce((a, k) => {
+    const d = en.plan.find((x) => x.key === k);
+    return a + (d ? d.videos.filter((v) => v.hy).length : 0);
+  }, 0);
 
   return (
     <div className="space-y-3">
@@ -1114,6 +1172,7 @@ function WeekView({ state, en, today, update, setTab }) {
         </button>
         <span className="font-mono text-sm text-slate-400">
           {fmtShort(week[0])} – {fmtShort(week[6])}
+          {hyThisWeek ? <span className="text-amber-300 ml-2">★ {hyThisWeek}</span> : null}
         </span>
         <button onClick={() => setOffset(offset + 1)} className="px-3 py-1 text-slate-400 hover:text-cyan-300 font-mono">
           →
@@ -1177,6 +1236,7 @@ function WeekView({ state, en, today, update, setTab }) {
                       ✓
                     </button>
                     <span className={(log.videosDone || []).includes(v.id) ? "text-slate-600 line-through" : "text-slate-200"}>
+                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                       {v.title}
                     </span>
                   </div>
@@ -1287,6 +1347,10 @@ function ProgressView({ cur, state, en, today }) {
   const p2 = prevV * state.settings.pass2PerVideo;
   const qLo = isRandom ? 70 : p1 + p2 + ph.p3[0];
   const qHi = isRandom ? 100 : p1 + p2 + ph.p3[1];
+  const hyAll = cur.flat.filter((v) => v.hy);
+  const hyTotal = hyAll.length;
+  const hyDone = hyAll.filter((v) => en.doneIds.has(v.id) || en.pre.has(v.id)).length;
+  const hyLeft = hyTotal - hyDone;
   const qBreak = isRandom
     ? "random across every completed system"
     : p1 + " targeted (" + wkV + " video" + (wkV === 1 ? "" : "s") + " done) + " +
@@ -1326,6 +1390,27 @@ function ProgressView({ cur, state, en, today }) {
       </div>
 
       <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
+          High yield <span className="text-amber-300">★</span>
+        </div>
+        <div className="rounded border border-slate-800 bg-slate-900 p-3">
+          <div className="flex justify-between items-baseline mb-1">
+            <span className="text-sm text-slate-300">Starred videos watched</span>
+            <span className="font-mono text-sm">
+              <span className="text-amber-300">{hyDone}</span>
+              <span className="text-slate-600"> / {hyTotal}</span>
+            </span>
+          </div>
+          <Bar pct={hyTotal ? (hyDone / hyTotal) * 100 : 0} tone={hyDone === hyTotal ? "good" : "warn"} />
+          <div className="text-xs text-slate-500 mt-2 leading-relaxed">
+            {hyLeft === 0
+              ? "Every high-yield video is done."
+              : hyLeft + " left — the topics Level 3 leans on hardest."}
+          </div>
+        </div>
+      </div>
+
+      <div>
         <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Sections</div>
         <div className="space-y-2">
           {cur.sections.map((s) => {
@@ -1338,6 +1423,12 @@ function ProgressView({ cur, state, en, today }) {
                     {s.name}
                   </span>
                   <span className="font-mono text-xs text-slate-500">
+                    {s.videos.filter((v) => v.hy).length ? (
+                      <span className="text-amber-300 mr-2">
+                        ★{s.videos.filter((v) => v.hy && (en.doneIds.has(v.id) || en.pre.has(v.id))).length}/
+                        {s.videos.filter((v) => v.hy).length}
+                      </span>
+                    ) : null}
                     {s.videos.length === 0 ? "no videos yet" : n + "/" + s.videos.length}
                   </span>
                 </div>
@@ -1506,7 +1597,10 @@ function SetupView({ cur, state, en, update, reload }) {
                             className={"w-4 h-4 shrink-0 rounded-sm border text-xs leading-none flex items-center justify-center " +
                               (on ? "border-emerald-500 bg-emerald-500 text-emerald-950" : "border-slate-600 text-transparent")}
                           >✓</button>
-                          <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>{v.title}</span>
+                          <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>
+                            {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                            {v.title}
+                          </span>
                           <button
                             onClick={() => update((st2) => {
                               const idx = cur.flat.findIndex((x) => x.id === v.id);

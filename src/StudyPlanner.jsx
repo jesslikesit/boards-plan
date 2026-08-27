@@ -517,6 +517,7 @@ function capacityFor(key, state) {
 function computeEngine(cur, state, today) {
   const S = state.settings;
   const flags = state.flags || {};
+  const scores = state.scores || {};
   const pre = new Set(state.preCompleted || []);
   const doneByDay = {};
   const doneIds = new Set();
@@ -575,16 +576,9 @@ function computeEngine(cur, state, today) {
       spill = want - give;
       targets[i] = give;
     }
-  } else if (delta > 0.01) {
-    // Ahead: drain from weekend days first; a weekday never drops below 1.
-    let credit = delta;
-    for (let i = 0; i < 14 && credit > 0; i++) {
-      if (!isWeekend(keys[i]) || targets[i] === 0) continue;
-      const take = Math.min(credit, targets[i] - 1);
-      targets[i] -= take;
-      credit -= take;
-    }
   }
+  // Being ahead does NOT lighten upcoming days. The queue simply drains faster,
+  // which pulls the finish date earlier on its own.
 
   // --- fill days with whole videos, carrying fractional remainder forward ---
   const queue = remaining.slice();
@@ -758,6 +752,61 @@ function computeEngine(cur, state, today) {
     v.sketchy.forEach((sk) => strandedSketchy.push({ ...sk, from: v.title, section: v.sectionName }));
   });
 
+  // --- review priority ---
+  // Weakness x yield, tempered by how many questions actually back the number.
+  // A 1/3 on a starred topic outranks a 12/20 on an unstarred one.
+  const reviewList = [];
+  cur.flat.forEach((v) => {
+    const done = pre.has(v.id) || doneIds.has(v.id);
+    if (!done) return;
+    const sc = scores[v.id];
+    const fl = flags[v.id];
+    if (!sc && !fl) return;
+    const total = sc ? sc.total : 0;
+    const acc = total ? (sc.correct / total) * 100 : null;
+    const when = (sc && sc.date) || (fl && fl.date) || doneByDay[v.id] || null;
+    const staleDays = when ? Math.max(0, daysBetween(when, today)) : 60;
+
+    const gap = acc === null ? 45 : 100 - acc;
+    const yieldMult = v.hy ? 2 : 1;
+    // Under ~5 questions the estimate is noisy, so pull it toward the middle.
+    const evidence = total ? Math.min(1, total / 5) : 0.6;
+    const priority =
+      gap * yieldMult * evidence + (fl ? 25 : 0) + Math.min(20, staleDays / 3);
+
+    reviewList.push({
+      id: v.id,
+      video: v,
+      correct: sc ? sc.correct : 0,
+      total,
+      acc,
+      note: fl ? fl.note : null,
+      flagged: !!fl,
+      staleDays,
+      priority: Math.round(priority),
+    });
+  });
+  reviewList.sort((a, b) => b.priority - a.priority);
+
+  // Completed videos with no accuracy data at all — unknowns, not strengths.
+  const unscored = cur.flat.filter(
+    (v) => (pre.has(v.id) || doneIds.has(v.id)) && !scores[v.id] && !flags[v.id]
+  );
+
+  // Section-level accuracy rollup.
+  const sectionAcc = cur.sections
+    .map((sec) => {
+      let c = 0, t = 0, n = 0;
+      sec.videos.forEach((v) => {
+        const sc = scores[v.id];
+        if (!sc || !sc.total) return;
+        c += sc.correct; t += sc.total; n += 1;
+      });
+      return t ? { id: sec.id, name: sec.name, correct: c, total: t, topics: n, acc: (c / t) * 100 } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.acc - b.acc);
+
   // --- flagged topics, freshest first ---
   const weakTopics = Object.keys(flags)
     .map((id) => ({ ...flags[id], id, video: cur.byId[id] }))
@@ -772,7 +821,8 @@ function computeEngine(cur, state, today) {
 
   return {
     doneIds, pre, doneByDay, remaining, remainingUnits, totalUnits, completedUnits,
-    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags,
+    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags, scores,
+    reviewList, unscored, sectionAcc,
     daysLeft: daysBetween(today, projectedFinish),
     finishedSections, recentSections,
     phase: plan.length ? plan[0].phase : phaseFor(today, state, 0),
@@ -787,7 +837,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 14 · Aug 8";
+const BUILD = "build 17 · Aug 27";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -883,7 +933,7 @@ const DEFAULT_SETTINGS = {
 
 /* Jess's log as of Aug 8 2026, restored from her export. This is the baseline
    the app ships with; the v4 migration below installs it over any older state. */
-const RESTORE = {"version":4,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"sectionOrder":["pulm","renal","gi","id","cards","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":[]}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{}};
+const RESTORE = {"version":5,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","id","cards","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}}};
 
 const freshState = () => JSON.parse(JSON.stringify(RESTORE));
 
@@ -893,7 +943,7 @@ function migrate(parsed) {
   parsed.preCompleted = parsed.preCompleted || [];
   parsed.extraVideos = parsed.extraVideos || {};
 
-  if (!parsed.version || parsed.version < 4) {
+  if (!parsed.version || parsed.version < 5) {
     // Install the restored baseline, keeping anything logged since the export.
     const base = JSON.parse(JSON.stringify(RESTORE));
     Object.keys(parsed.days).forEach((k) => {
@@ -907,6 +957,10 @@ function migrate(parsed) {
     });
     base.preCompleted = Array.from(new Set(base.preCompleted.concat(parsed.preCompleted)));
     base.extraVideos = { ...parsed.extraVideos, ...base.extraVideos };
+    if (parsed.settings && parsed.settings.blocks && parsed.settings.blocks.length) {
+      base.settings.blocks = parsed.settings.blocks;
+    }
+    base.flags = { ...(base.flags || {}), ...(parsed.flags || {}) };
     // A video logged on a date shouldn't also sit in the undated pile.
     const dated = new Set(
       Object.values(base.days).flatMap((d) => d.videosDone || [])
@@ -1008,6 +1062,55 @@ function Tag({ children, tone }) {
   return <span className={"px-1.5 py-0.5 rounded border text-xs font-mono uppercase " + c}>{children}</span>;
 }
 
+
+function ScoreEntry({ id, score, onAdd, onClear }) {
+  const acc = score && score.total ? Math.round((score.correct / score.total) * 100) : null;
+  return (
+    <div className="rounded border border-slate-700 bg-slate-950 p-2">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs uppercase tracking-wider text-slate-500">How did you do?</span>
+        {score && score.total ? (
+          <span className="font-mono text-xs">
+            <span className={acc >= 70 ? "text-emerald-300" : acc >= 50 ? "text-amber-300" : "text-rose-300"}>
+              {acc}%
+            </span>
+            <span className="text-slate-600"> · {score.correct}/{score.total}</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="flex gap-1.5">
+        {[3, 2, 1, 0].map((n) => (
+          <button
+            key={n}
+            onClick={() => onAdd(n, 3)}
+            className="flex-1 py-2 rounded border border-slate-700 text-sm font-mono text-slate-300 hover:border-cyan-600"
+          >
+            {n}/3
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5 mt-1.5">
+        {[[1, 1], [0, 1], [1, 2]].map(([c, t], i) => (
+          <button
+            key={i}
+            onClick={() => onAdd(c, t)}
+            className="flex-1 py-1.5 rounded border border-slate-800 text-xs font-mono text-slate-500 hover:border-slate-600"
+          >
+            +{c}/{t}
+          </button>
+        ))}
+        <button
+          onClick={onClear}
+          disabled={!score}
+          className="flex-1 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40"
+        >
+          clear
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Field({ label, children }) {
   return (
     <label className="block mb-3">
@@ -1027,6 +1130,14 @@ const inputCls =
 function TodayView({ cur, state, en, today, update }) {
   const nextUp = en.remaining[0];
   const [flagging, setFlagging] = useState(null);
+  const [scoring, setScoring] = useState(null);
+
+  const addScore = (id, c, t) =>
+    update((st2) => {
+      st2.scores = st2.scores || {};
+      const prev = st2.scores[id] || { correct: 0, total: 0 };
+      st2.scores[id] = { correct: prev.correct + c, total: prev.total + t, date: today };
+    });
   const day = en.plan.find((d) => d.key === today) || en.plan[0];
   const log = state.days[today] || {};
   const doneV = new Set(log.videosDone || []);
@@ -1097,7 +1208,21 @@ function TodayView({ cur, state, en, today, update }) {
                     </Check>
                   </div>
                   <button
-                    onClick={() => setFlagging(flagging === v.id ? null : v.id)}
+                    onClick={() => { setScoring(scoring === v.id ? null : v.id); setFlagging(null); }}
+                    title="log how many you got right"
+                    className={
+                      "shrink-0 w-11 rounded border text-xs font-mono " +
+                      (en.scores[v.id]
+                        ? "border-cyan-800 bg-cyan-950 text-cyan-300"
+                        : "border-slate-800 bg-slate-900 text-slate-600 hover:text-cyan-400")
+                    }
+                  >
+                    {en.scores[v.id] && en.scores[v.id].total
+                      ? Math.round((en.scores[v.id].correct / en.scores[v.id].total) * 100) + "%"
+                      : "%"}
+                  </button>
+                  <button
+                    onClick={() => { setFlagging(flagging === v.id ? null : v.id); setScoring(null); }}
                     title="flag this as shaky"
                     className={
                       "shrink-0 w-11 rounded border text-lg " +
@@ -1136,6 +1261,24 @@ function TodayView({ cur, state, en, today, update }) {
                 );
               })}
           </Block>
+
+          {scoring ? (
+            <div className="rounded border border-cyan-900 bg-slate-900 p-3">
+              <div className="text-sm text-cyan-200 mb-2">{(cur.byId[scoring] || {}).title}</div>
+              <ScoreEntry
+                id={scoring}
+                score={en.scores[scoring]}
+                onAdd={(c, t) => addScore(scoring, c, t)}
+                onClear={() => update((st2) => { if (st2.scores) delete st2.scores[scoring]; })}
+              />
+              <button
+                onClick={() => setScoring(null)}
+                className="mt-2 w-full py-2 rounded border border-slate-700 text-sm text-slate-300"
+              >
+                done
+              </button>
+            </div>
+          ) : null}
 
           {flagging ? (
             <div className="rounded border border-rose-900 bg-rose-950 p-3">
@@ -1329,15 +1472,35 @@ function Empty() {
    9. WEEK
    ============================================================ */
 
-function WeekView({ state, en, today, update, setTab }) {
+function WeekView({ cur, state, en, today, update, setTab }) {
   const [offset, setOffset] = useState(0);
+  const [editingQ, setEditingQ] = useState(null);
+
+  const setQ = (k, n) =>
+    update((st2) => {
+      const d = (st2.days[k] = st2.days[k] || { type: "normal" });
+      d.questionsDone = Math.max(0, n);
+    });
+  const bumpQ = (k, n) =>
+    update((st2) => {
+      const d = (st2.days[k] = st2.days[k] || { type: "normal" });
+      d.questionsDone = Math.max(0, (d.questionsDone || 0) + n);
+    });
   const start = addDays(today, offset * 7 - ((parseKey(today).getDay() + 6) % 7));
   const week = [];
   for (let i = 0; i < 7; i++) week.push(addDays(start, i));
-  const hyThisWeek = week.reduce((a, k) => {
-    const d = en.plan.find((x) => x.key === k);
-    return a + (d ? d.videos.filter((v) => v.hy).length : 0);
-  }, 0);
+
+  const rows = week.map((k) => {
+    const planned = en.plan.find((d) => d.key === k);
+    const log = state.days[k] || {};
+    const logged = (log.videosDone || []).map((id) => cur.byId[id]).filter(Boolean);
+    // The plan only runs forward from today, so past days come from the log.
+    return { key: k, planned, log, videos: planned ? planned.videos : logged };
+  });
+
+  const hyThisWeek = rows.reduce((a, r) => a + r.videos.filter((v) => v.hy).length, 0);
+  const doneThisWeek = rows.reduce((a, r) => a + (r.log.videosDone || []).length, 0);
+  const qThisWeek = rows.reduce((a, r) => a + (r.log.questionsDone || 0), 0);
 
   return (
     <div className="space-y-3">
@@ -1354,14 +1517,24 @@ function WeekView({ state, en, today, update, setTab }) {
         </button>
       </div>
 
-      {week.map((k) => {
-        const day = en.plan.find((d) => d.key === k);
-        const log = state.days[k] || {};
+      <div className="grid grid-cols-2 rounded border border-slate-800 bg-slate-900">
+        <div className="px-3 py-2 border-r border-slate-800">
+          <div className="text-xs uppercase tracking-widest text-slate-500">videos done</div>
+          <div className="font-mono text-lg text-cyan-300 leading-tight">{doneThisWeek}</div>
+        </div>
+        <div className="px-3 py-2">
+          <div className="text-xs uppercase tracking-widest text-slate-500">questions</div>
+          <div className="font-mono text-lg text-cyan-300 leading-tight">{qThisWeek}</div>
+        </div>
+      </div>
+
+      {rows.map(({ key: k, planned, log, videos }) => {
         const isToday = k === today;
         const past = k < today;
-        const doneN = (log.videosDone || []).length;
-        const planned = day ? day.videos.length : 0;
+        const doneIds = log.videosDone || [];
         const type = log.type || "normal";
+        const qDone = log.questionsDone || 0;
+        const qTarget = planned ? (planned.isRandom ? planned.pass1 : planned.pass1Planned) : null;
 
         return (
           <div
@@ -1372,74 +1545,127 @@ function WeekView({ state, en, today, update, setTab }) {
             }
           >
             <div className="flex items-baseline justify-between mb-2">
-              <span className={"font-mono text-sm " + (isToday ? "text-cyan-300" : "text-slate-400")}>
+              <span className={"font-mono text-sm " + (isToday ? "text-cyan-300" : past ? "text-slate-500" : "text-slate-400")}>
                 {fmtLong(k)}
                 {isToday ? " ·  today" : ""}
               </span>
               <span className="font-mono text-xs text-slate-600">
-                {type === "off" ? "off" : day ? (day.block ? day.block.label + " · " : "") + day.minutes + "m" : "—"}
+                {type === "off"
+                  ? "off"
+                  : planned
+                  ? (planned.block ? planned.block.label + " · " : "") + planned.minutes + "m"
+                  : doneIds.length
+                  ? doneIds.length + " done"
+                  : ""}
               </span>
             </div>
 
-            {past || isToday ? (
-              <div className="mb-2">
-                <Bar pct={planned ? (doneN / planned) * 100 : doneN ? 100 : 0} tone={doneN >= planned && planned ? "good" : undefined} />
-              </div>
-            ) : null}
-
-            {day && day.videos.length ? (
+            {videos.length ? (
               <div className="space-y-1">
-                {day.videos.map((v) => (
-                  <div key={v.id} className="flex items-start gap-2 text-sm">
-                    <button
-                      onClick={() =>
-                        update((s) => {
-                          const d = (s.days[k] = s.days[k] || { type: "normal" });
-                          d.videosDone = d.videosDone || [];
-                          d.videosDone = d.videosDone.includes(v.id)
-                            ? d.videosDone.filter((x) => x !== v.id)
-                            : d.videosDone.concat(v.id);
-                        })
-                      }
-                      className={
-                        "mt-0.5 shrink-0 w-4 h-4 rounded-sm border text-xs leading-none flex items-center justify-center " +
-                        ((log.videosDone || []).includes(v.id)
-                          ? "border-emerald-500 bg-emerald-500 text-emerald-950"
-                          : "border-slate-600 text-transparent hover:border-slate-500")
-                      }
-                    >
-                      ✓
-                    </button>
-                    <span className={(log.videosDone || []).includes(v.id) ? "text-slate-600 line-through" : "text-slate-200"}>
-                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
-                      {v.title}
-                    </span>
-                  </div>
-                ))}
-                {day.sketchy.length ? (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {day.sketchy.map((s, i) => (
+                {videos.map((v) => {
+                  const on = doneIds.includes(v.id);
+                  return (
+                    <div key={v.id} className="flex items-start gap-2 text-sm">
+                      <button
+                        onClick={() =>
+                          update((st2) => {
+                            const d = (st2.days[k] = st2.days[k] || { type: "normal" });
+                            d.videosDone = d.videosDone || [];
+                            d.videosDone = d.videosDone.includes(v.id)
+                              ? d.videosDone.filter((x) => x !== v.id)
+                              : d.videosDone.concat(v.id);
+                          })
+                        }
+                        className={
+                          "mt-0.5 shrink-0 w-4 h-4 rounded-sm border text-xs leading-none flex items-center justify-center " +
+                          (on
+                            ? "border-emerald-500 bg-emerald-500 text-emerald-950"
+                            : "border-slate-600 text-transparent hover:border-slate-500")
+                        }
+                      >
+                        ✓
+                      </button>
+                      <span className={on ? "text-slate-500 line-through" : "text-slate-200"}>
+                        {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                        {v.title}
+                      </span>
+                    </div>
+                  );
+                })}
+                {planned && planned.sketchy.length ? (
+                  <div className="flex flex-wrap gap-x-3 pt-1">
+                    {planned.sketchy.map((sk, i) => (
                       <span key={i} className="text-xs text-slate-500 font-mono">
-                        [{s.s}] {s.t}
+                        [{sk.s}] {sk.t}
                       </span>
                     ))}
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div className="text-sm text-slate-600">{type === "off" ? "Day off" : "—"}</div>
+              <div className="text-sm text-slate-600">
+                {type === "off" ? "Day off" : past ? "nothing logged" : "—"}
+              </div>
             )}
 
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 pt-2 border-t border-slate-800 text-xs font-mono text-slate-500">
-              <span>{day ? (day.isRandom ? day.pass1 + " random Q" : day.pass1Planned + " targeted Q") : "0 Q"}</span>
-              {day && day.pass2 && day.pass2.n ? <span>+{day.pass2.n} recent</span> : null}
-              {day && day.pass3 && day.pass3.n ? <span>+{day.pass3.n} older systems</span> : null}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 pt-2 border-t border-slate-800 text-xs font-mono text-slate-500">
+              <button
+                onClick={() => setEditingQ(editingQ === k ? null : k)}
+                className={
+                  "px-2 py-1 -ml-2 rounded hover:bg-slate-800 " + (qDone ? "text-cyan-400" : "text-slate-500")
+                }
+              >
+                {qDone} question{qDone === 1 ? "" : "s"}
+                {qTarget ? <span className="text-slate-600"> / {qTarget}</span> : null}
+                <span className="text-slate-600 ml-1">{editingQ === k ? "−" : "＋"}</span>
+              </button>
+              {planned && planned.pass2 && planned.pass2.n ? <span>+{planned.pass2.n} recent</span> : null}
+              {planned && planned.pass3 && planned.pass3.n ? <span>+{planned.pass3.n} older</span> : null}
             </div>
-            {day && day.pass2 && day.pass2.n ? (
-              <div className="text-xs text-slate-600 mt-1">recent: {day.pass2.topics.join(", ")}</div>
+
+            {editingQ === k ? (
+              <div className="mt-2 rounded border border-slate-700 bg-slate-950 p-2">
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 5, 10].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => bumpQ(k, n)}
+                      className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-cyan-600 font-mono"
+                    >
+                      +{n}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => bumpQ(k, -1)}
+                    disabled={!qDone}
+                    className="px-3 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40"
+                  >
+                    −1
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={qDone}
+                    onChange={(e) => setQ(k, Math.max(0, +e.target.value || 0))}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 font-mono text-center focus:border-cyan-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => setQ(k, 0)}
+                    disabled={!qDone}
+                    className="px-3 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40"
+                  >
+                    clear
+                  </button>
+                </div>
+              </div>
             ) : null}
-            {day && day.pass3 && day.pass3.sources.length ? (
-              <div className="text-xs text-slate-600 mt-1">older: {day.pass3.sources.join(", ")}</div>
+            {planned && planned.pass2 && planned.pass2.n ? (
+              <div className="text-xs text-slate-600 mt-1">recent: {planned.pass2.topics.join(", ")}</div>
+            ) : null}
+            {planned && planned.pass3 && planned.pass3.sources.length ? (
+              <div className="text-xs text-slate-600 mt-1">older: {planned.pass3.sources.join(", ")}</div>
             ) : null}
           </div>
         );
@@ -1651,6 +1877,173 @@ function ScoreRow({ label, v, goal }) {
   );
 }
 
+
+/* ============================================================
+   10b. REVIEW — what to spend more time on
+   ============================================================ */
+
+function ReviewView({ cur, state, en, today, update }) {
+  const [open, setOpen] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  const [backfill, setBackfill] = useState(false);
+
+  const addScore = (id, c, t) =>
+    update((st2) => {
+      st2.scores = st2.scores || {};
+      const prev = st2.scores[id] || { correct: 0, total: 0 };
+      st2.scores[id] = { correct: prev.correct + c, total: prev.total + t, date: today };
+    });
+
+  const list = en.reviewList;
+  const shown = showAll ? list : list.slice(0, 12);
+  const band = (p) => (p >= 60 ? "now" : p >= 30 ? "soon" : "ok");
+  const bandCls = {
+    now: "border-rose-900 bg-rose-950",
+    soon: "border-amber-900 bg-slate-900",
+    ok: "border-slate-800 bg-slate-900",
+  };
+  const accCls = (a) =>
+    a === null ? "text-slate-500" : a >= 70 ? "text-emerald-300" : a >= 50 ? "text-amber-300" : "text-rose-300";
+
+  return (
+    <div className="space-y-5">
+      {!list.length ? (
+        <div className="rounded border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400 leading-relaxed">
+          Nothing to rank yet. Log how many questions you got right using the <span className="font-mono text-cyan-300">%</span> button
+          next to each video on Today, and this list builds itself.
+        </div>
+      ) : (
+        <div>
+          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
+            Spend more time here
+          </div>
+          <p className="text-xs text-slate-600 mb-3 leading-relaxed">
+            Ranked by how far below the mark you are, doubled for high-yield topics, and
+            discounted when only a couple of questions back the number.
+          </p>
+          <div className="space-y-2">
+            {shown.map((r) => (
+              <div key={r.id} className={"rounded border p-3 " + bandCls[band(r.priority)]}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-sm text-slate-100 min-w-0">
+                    {r.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                    {r.video.title}
+                    {r.flagged ? <span className="text-rose-400 ml-1">⚑</span> : null}
+                  </span>
+                  <span className="font-mono text-sm shrink-0">
+                    <span className={accCls(r.acc)}>{r.acc === null ? "—" : Math.round(r.acc) + "%"}</span>
+                    {r.total ? <span className="text-slate-600"> {r.correct}/{r.total}</span> : null}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 mt-1 font-mono">
+                  {r.video.sectionName}
+                  {r.total && r.total < 5 ? <span className="text-slate-600"> · thin data</span> : null}
+                  {r.staleDays >= 14 ? <span className="text-slate-600"> · {r.staleDays}d ago</span> : null}
+                </div>
+                {r.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{r.note}</div> : null}
+                <div className="text-xs text-slate-500 mt-2 leading-relaxed">{r.video.amboss.join(" · ")}</div>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => setOpen(open === r.id ? null : r.id)}
+                    className="flex-1 py-1.5 rounded border border-slate-700 text-xs text-slate-300 hover:border-cyan-600"
+                  >
+                    {open === r.id ? "close" : "log more questions"}
+                  </button>
+                  {r.flagged ? (
+                    <button
+                      onClick={() => update((st2) => { if (st2.flags) delete st2.flags[r.id]; })}
+                      className="px-3 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:text-emerald-400"
+                    >
+                      unflag
+                    </button>
+                  ) : null}
+                </div>
+                {open === r.id ? (
+                  <div className="mt-2">
+                    <ScoreEntry
+                      id={r.id}
+                      score={en.scores[r.id]}
+                      onAdd={(c, t) => addScore(r.id, c, t)}
+                      onClear={() => update((st2) => { if (st2.scores) delete st2.scores[r.id]; })}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {list.length > 12 ? (
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className="mt-2 w-full py-2 rounded border border-slate-800 text-sm text-slate-500 hover:border-slate-700"
+            >
+              {showAll ? "show top 12" : "show all " + list.length}
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      {en.sectionAcc.length ? (
+        <div>
+          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Accuracy by system</div>
+          <div className="space-y-2">
+            {en.sectionAcc.map((sa) => (
+              <div key={sa.id}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-slate-300">{sa.name}</span>
+                  <span className="font-mono text-xs">
+                    <span className={accCls(sa.acc)}>{Math.round(sa.acc)}%</span>
+                    <span className="text-slate-600"> {sa.correct}/{sa.total}</span>
+                  </span>
+                </div>
+                <Bar pct={sa.acc} tone={sa.acc >= 70 ? "good" : sa.acc >= 50 ? "warn" : undefined} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {en.unscored.length ? (
+        <div>
+          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
+            No accuracy logged ({en.unscored.length})
+          </div>
+          <p className="text-xs text-slate-600 mb-2 leading-relaxed">
+            Watched, but never scored. These are unknowns rather than strengths — they can't
+            be ranked until there's a number behind them.
+          </p>
+          <button
+            onClick={() => setBackfill(!backfill)}
+            className="w-full py-2 rounded border border-slate-800 text-sm text-slate-400 hover:border-slate-700"
+          >
+            {backfill ? "hide" : "backfill scores"}
+          </button>
+          {backfill ? (
+            <div className="space-y-2 mt-2">
+              {en.unscored.map((v) => (
+                <div key={v.id} className="rounded border border-slate-800 bg-slate-900 p-3">
+                  <div className="flex items-baseline justify-between gap-2 mb-2">
+                    <span className="text-sm text-slate-200">
+                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      {v.title}
+                    </span>
+                    <span className="text-xs text-slate-600 font-mono shrink-0">{v.sectionName}</span>
+                  </div>
+                  <ScoreEntry
+                    id={v.id}
+                    score={en.scores[v.id]}
+                    onAdd={(c, t) => addScore(v.id, c, t)}
+                    onClear={() => update((st2) => { if (st2.scores) delete st2.scores[v.id]; })}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /* ============================================================
    11. SETUP
    ============================================================ */
@@ -1713,8 +2106,8 @@ function SetupView({ cur, state, en, update, reload }) {
 
       <Group title="Rotation blocks">
         <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-          Change the pace for a stretch. Nights and inpatient lighten the load; vacation
-          raises it, since the days are free. The finish date updates as soon as you add one.
+          Change the pace for a stretch. A hard block lightens the load; vacation raises it.
+          The finish date updates as soon as you add one.
         </p>
         {(S.blocks || []).map((b, i) => (
           <div key={b.id} className="rounded border border-slate-800 bg-slate-900 p-3 mb-2">
@@ -1768,11 +2161,10 @@ function SetupView({ cur, state, en, update, reload }) {
             </div>
           </div>
         ))}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {[
-            { label: "Nights", weekday: 0, sat: 1, sun: 1 },
-            { label: "Inpatient", weekday: 1, sat: 1, sun: 2 },
-            { label: "Vacation", weekday: 4, sat: 4, sun: 4 },
+            { label: "Hard block", weekday: 1, sat: 2, sun: 2 },
+            { label: "Vacation", weekday: 2, sat: 3, sun: 3 },
           ].map((preset) => (
             <button
               key={preset.label}
@@ -2114,6 +2506,7 @@ export default function StudyPlanner() {
   const TABS = [
     ["today", "Today"],
     ["week", "Week"],
+    ["review", "Review"],
     ["progress", "Progress"],
     ["setup", "Setup"],
   ];
@@ -2142,7 +2535,7 @@ export default function StudyPlanner() {
           >
             {behind
               ? `${Math.abs(en.delta)} video${Math.abs(en.delta) === 1 ? "" : "s"} behind — spread across the next ${state.settings.catchUpWindowDays} days.`
-              : `${en.delta} video${en.delta === 1 ? "" : "s"} ahead — the coming weekend is lighter.`}
+              : `${en.delta} video${en.delta === 1 ? "" : "s"} ahead — finishing ${fmtFinish(en.projectedFinish)}. Pace stays the same.`}
           </div>
         ) : null}
 
@@ -2172,7 +2565,7 @@ export default function StudyPlanner() {
               key={id}
               onClick={() => setTab(id)}
               className={
-                "px-3 py-2 text-sm border-b-2 -mb-px transition-colors " +
+                "px-2.5 py-2 text-sm border-b-2 -mb-px transition-colors " +
                 (tab === id ? "border-cyan-400 text-cyan-300" : "border-transparent text-slate-500 hover:text-slate-300")
               }
             >
@@ -2182,7 +2575,8 @@ export default function StudyPlanner() {
         </div>
 
         {tab === "today" ? <TodayView cur={cur} state={state} en={en} today={today} update={update} /> : null}
-        {tab === "week" ? <WeekView state={state} en={en} today={today} update={update} setTab={setTab} /> : null}
+        {tab === "week" ? <WeekView cur={cur} state={state} en={en} today={today} update={update} setTab={setTab} /> : null}
+        {tab === "review" ? <ReviewView cur={cur} state={state} en={en} today={today} update={update} /> : null}
         {tab === "progress" ? <ProgressView cur={cur} state={state} en={en} today={today} /> : null}
         {tab === "setup" ? (
           <SetupView cur={cur} state={state} en={en} update={update} reload={(s) => setState(s)} />

@@ -762,23 +762,17 @@ function computeEngine(cur, state, today) {
     const sc = scores[v.id];
     const fl = flags[v.id];
     if (!sc && !fl) return;
-    const total = sc ? sc.total : 0;
-    const acc = total ? (sc.correct / total) * 100 : null;
+    const acc = sc && typeof sc.pct === "number" ? sc.pct : null;
     const when = (sc && sc.date) || (fl && fl.date) || doneByDay[v.id] || null;
     const staleDays = when ? Math.max(0, daysBetween(when, today)) : 60;
 
     const gap = acc === null ? 45 : 100 - acc;
     const yieldMult = v.hy ? 2 : 1;
-    // Under ~5 questions the estimate is noisy, so pull it toward the middle.
-    const evidence = total ? Math.min(1, total / 5) : 0.6;
-    const priority =
-      gap * yieldMult * evidence + (fl ? 25 : 0) + Math.min(20, staleDays / 3);
+    const priority = gap * yieldMult + (fl ? 25 : 0) + Math.min(20, staleDays / 3);
 
     reviewList.push({
       id: v.id,
       video: v,
-      correct: sc ? sc.correct : 0,
-      total,
       acc,
       note: fl ? fl.note : null,
       flagged: !!fl,
@@ -796,13 +790,13 @@ function computeEngine(cur, state, today) {
   // Section-level accuracy rollup.
   const sectionAcc = cur.sections
     .map((sec) => {
-      let c = 0, t = 0, n = 0;
+      let sum = 0, n = 0;
       sec.videos.forEach((v) => {
         const sc = scores[v.id];
-        if (!sc || !sc.total) return;
-        c += sc.correct; t += sc.total; n += 1;
+        if (!sc || typeof sc.pct !== "number") return;
+        sum += sc.pct; n += 1;
       });
-      return t ? { id: sec.id, name: sec.name, correct: c, total: t, topics: n, acc: (c / t) * 100 } : null;
+      return n ? { id: sec.id, name: sec.name, topics: n, acc: sum / n } : null;
     })
     .filter(Boolean)
     .sort((a, b) => a.acc - b.acc);
@@ -837,7 +831,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 17 · Aug 27";
+const BUILD = "build 18 · Aug 27";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -1063,46 +1057,33 @@ function Tag({ children, tone }) {
 }
 
 
-function ScoreEntry({ id, score, onAdd, onClear }) {
-  const acc = score && score.total ? Math.round((score.correct / score.total) * 100) : null;
+function ScoreEntry({ score, onSet, onClear, autoFocus }) {
+  const pct = score && typeof score.pct === "number" ? score.pct : "";
   return (
     <div className="rounded border border-slate-700 bg-slate-950 p-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs uppercase tracking-wider text-slate-500">How did you do?</span>
-        {score && score.total ? (
-          <span className="font-mono text-xs">
-            <span className={acc >= 70 ? "text-emerald-300" : acc >= 50 ? "text-amber-300" : "text-rose-300"}>
-              {acc}%
-            </span>
-            <span className="text-slate-600"> · {score.correct}/{score.total}</span>
-          </span>
-        ) : null}
-      </div>
-      <div className="flex gap-1.5">
-        {[3, 2, 1, 0].map((n) => (
-          <button
-            key={n}
-            onClick={() => onAdd(n, 3)}
-            className="flex-1 py-2 rounded border border-slate-700 text-sm font-mono text-slate-300 hover:border-cyan-600"
-          >
-            {n}/3
-          </button>
-        ))}
-      </div>
-      <div className="flex items-center gap-1.5 mt-1.5">
-        {[[1, 1], [0, 1], [1, 2]].map(([c, t], i) => (
-          <button
-            key={i}
-            onClick={() => onAdd(c, t)}
-            className="flex-1 py-1.5 rounded border border-slate-800 text-xs font-mono text-slate-500 hover:border-slate-600"
-          >
-            +{c}/{t}
-          </button>
-        ))}
+      <div className="flex items-center gap-2">
+        <span className="text-xs uppercase tracking-wider text-slate-500 shrink-0">% correct</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min="0"
+          max="100"
+          autoFocus={autoFocus}
+          value={pct}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === "") return onClear();
+            const n = Math.max(0, Math.min(100, Math.round(+raw)));
+            if (!isNaN(n)) onSet(n);
+          }}
+          placeholder="—"
+          className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-lg text-slate-100 font-mono text-center focus:border-cyan-500 focus:outline-none"
+        />
+        <span className="font-mono text-lg text-slate-600 shrink-0">%</span>
         <button
           onClick={onClear}
-          disabled={!score}
-          className="flex-1 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40"
+          disabled={pct === ""}
+          className="px-3 py-2 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40 shrink-0"
         >
           clear
         </button>
@@ -1132,12 +1113,12 @@ function TodayView({ cur, state, en, today, update }) {
   const [flagging, setFlagging] = useState(null);
   const [scoring, setScoring] = useState(null);
 
-  const addScore = (id, c, t) =>
+  const setScore = (id, pct) =>
     update((st2) => {
       st2.scores = st2.scores || {};
-      const prev = st2.scores[id] || { correct: 0, total: 0 };
-      st2.scores[id] = { correct: prev.correct + c, total: prev.total + t, date: today };
+      st2.scores[id] = { pct, date: today };
     });
+  const clearScore = (id) => update((st2) => { if (st2.scores) delete st2.scores[id]; });
   const day = en.plan.find((d) => d.key === today) || en.plan[0];
   const log = state.days[today] || {};
   const doneV = new Set(log.videosDone || []);
@@ -1217,8 +1198,8 @@ function TodayView({ cur, state, en, today, update }) {
                         : "border-slate-800 bg-slate-900 text-slate-600 hover:text-cyan-400")
                     }
                   >
-                    {en.scores[v.id] && en.scores[v.id].total
-                      ? Math.round((en.scores[v.id].correct / en.scores[v.id].total) * 100) + "%"
+                    {en.scores[v.id] && typeof en.scores[v.id].pct === "number"
+                      ? en.scores[v.id].pct + "%"
                       : "%"}
                   </button>
                   <button
@@ -1266,10 +1247,10 @@ function TodayView({ cur, state, en, today, update }) {
             <div className="rounded border border-cyan-900 bg-slate-900 p-3">
               <div className="text-sm text-cyan-200 mb-2">{(cur.byId[scoring] || {}).title}</div>
               <ScoreEntry
-                id={scoring}
+                autoFocus
                 score={en.scores[scoring]}
-                onAdd={(c, t) => addScore(scoring, c, t)}
-                onClear={() => update((st2) => { if (st2.scores) delete st2.scores[scoring]; })}
+                onSet={(n) => setScore(scoring, n)}
+                onClear={() => clearScore(scoring)}
               />
               <button
                 onClick={() => setScoring(null)}
@@ -1887,12 +1868,12 @@ function ReviewView({ cur, state, en, today, update }) {
   const [showAll, setShowAll] = useState(false);
   const [backfill, setBackfill] = useState(false);
 
-  const addScore = (id, c, t) =>
+  const setScore = (id, pct) =>
     update((st2) => {
       st2.scores = st2.scores || {};
-      const prev = st2.scores[id] || { correct: 0, total: 0 };
-      st2.scores[id] = { correct: prev.correct + c, total: prev.total + t, date: today };
+      st2.scores[id] = { pct, date: today };
     });
+  const clearScore = (id) => update((st2) => { if (st2.scores) delete st2.scores[id]; });
 
   const list = en.reviewList;
   const shown = showAll ? list : list.slice(0, 12);
@@ -1909,7 +1890,7 @@ function ReviewView({ cur, state, en, today, update }) {
     <div className="space-y-5">
       {!list.length ? (
         <div className="rounded border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400 leading-relaxed">
-          Nothing to rank yet. Log how many questions you got right using the <span className="font-mono text-cyan-300">%</span> button
+          Nothing to rank yet. Type your percent into the <span className="font-mono text-cyan-300">%</span> button
           next to each video on Today, and this list builds itself.
         </div>
       ) : (
@@ -1918,8 +1899,8 @@ function ReviewView({ cur, state, en, today, update }) {
             Spend more time here
           </div>
           <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-            Ranked by how far below the mark you are, doubled for high-yield topics, and
-            discounted when only a couple of questions back the number.
+            Ranked by how far below 100% you are, doubled for high-yield topics, with a
+            nudge for anything flagged or gone stale.
           </p>
           <div className="space-y-2">
             {shown.map((r) => (
@@ -1931,13 +1912,11 @@ function ReviewView({ cur, state, en, today, update }) {
                     {r.flagged ? <span className="text-rose-400 ml-1">⚑</span> : null}
                   </span>
                   <span className="font-mono text-sm shrink-0">
-                    <span className={accCls(r.acc)}>{r.acc === null ? "—" : Math.round(r.acc) + "%"}</span>
-                    {r.total ? <span className="text-slate-600"> {r.correct}/{r.total}</span> : null}
+                    <span className={accCls(r.acc)}>{r.acc === null ? "—" : r.acc + "%"}</span>
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 mt-1 font-mono">
                   {r.video.sectionName}
-                  {r.total && r.total < 5 ? <span className="text-slate-600"> · thin data</span> : null}
                   {r.staleDays >= 14 ? <span className="text-slate-600"> · {r.staleDays}d ago</span> : null}
                 </div>
                 {r.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{r.note}</div> : null}
@@ -1947,7 +1926,7 @@ function ReviewView({ cur, state, en, today, update }) {
                     onClick={() => setOpen(open === r.id ? null : r.id)}
                     className="flex-1 py-1.5 rounded border border-slate-700 text-xs text-slate-300 hover:border-cyan-600"
                   >
-                    {open === r.id ? "close" : "log more questions"}
+                    {open === r.id ? "close" : r.acc === null ? "add a score" : "change score"}
                   </button>
                   {r.flagged ? (
                     <button
@@ -1961,10 +1940,10 @@ function ReviewView({ cur, state, en, today, update }) {
                 {open === r.id ? (
                   <div className="mt-2">
                     <ScoreEntry
-                      id={r.id}
+                      autoFocus
                       score={en.scores[r.id]}
-                      onAdd={(c, t) => addScore(r.id, c, t)}
-                      onClear={() => update((st2) => { if (st2.scores) delete st2.scores[r.id]; })}
+                      onSet={(n) => setScore(r.id, n)}
+                      onClear={() => clearScore(r.id)}
                     />
                   </div>
                 ) : null}
@@ -1992,7 +1971,7 @@ function ReviewView({ cur, state, en, today, update }) {
                   <span className="text-slate-300">{sa.name}</span>
                   <span className="font-mono text-xs">
                     <span className={accCls(sa.acc)}>{Math.round(sa.acc)}%</span>
-                    <span className="text-slate-600"> {sa.correct}/{sa.total}</span>
+                    <span className="text-slate-600"> across {sa.topics}</span>
                   </span>
                 </div>
                 <Bar pct={sa.acc} tone={sa.acc >= 70 ? "good" : sa.acc >= 50 ? "warn" : undefined} />
@@ -2029,10 +2008,9 @@ function ReviewView({ cur, state, en, today, update }) {
                     <span className="text-xs text-slate-600 font-mono shrink-0">{v.sectionName}</span>
                   </div>
                   <ScoreEntry
-                    id={v.id}
                     score={en.scores[v.id]}
-                    onAdd={(c, t) => addScore(v.id, c, t)}
-                    onClear={() => update((st2) => { if (st2.scores) delete st2.scores[v.id]; })}
+                    onSet={(n) => setScore(v.id, n)}
+                    onClear={() => clearScore(v.id)}
                   />
                 </div>
               ))}

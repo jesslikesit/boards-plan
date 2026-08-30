@@ -29,18 +29,18 @@ const SECTIONS = [
     "Inflammatory Bowel Disease", "Diarrhea", "Gastrointestinal Bleeding", "Hernias", "Malabsorption",
     "Gastrointestinal Pharmacology",
   ]},
-  { id: "id", name: "Infectious Disease", qbank: "Infectious diseases", videos: [
-    "Penicillins", "Beta Lactams", "Protein Synthesis Inhibitors", "Other Antibiotics",
-    "Fungal Infections", "Antifungal Drugs", "Protozoal Infections", "Malaria", "HIV Infection",
-    "HIV Drugs", "HIV Complications", "Tick-borne Illnesses", "Sexually-transmitted Infections",
-    "Meningitis", "Tuberculosis", "Adult Vaccinations",
-  ]},
   { id: "cards", name: "Cardiology", qbank: "Cardiovascular system", videos: [
     "EKG Interpretation", "ACLS and Tachycardias", "Atrial Fibrillation and Flutter", "Bradycardia",
     "Coronary Artery Disease", "STEMI", "Heart Failure I", "Heart Failure II", "Cardiomyopathy",
     "Heart Murmurs", "Heart Sounds", "Cardiovascular Pharmacology I", "Cardiovascular Pharmacology II",
     "Pericardial Disease", "Valvular Heart Disease", "Hyperlipidemia", "Hypertension",
     "Peripheral Vascular Disease", "Aortic Disease",
+  ]},
+  { id: "id", name: "Infectious Disease", qbank: "Infectious diseases", videos: [
+    "Penicillins", "Beta Lactams", "Protein Synthesis Inhibitors", "Other Antibiotics",
+    "Fungal Infections", "Antifungal Drugs", "Protozoal Infections", "Malaria", "HIV Infection",
+    "HIV Drugs", "HIV Complications", "Tick-borne Illnesses", "Sexually-transmitted Infections",
+    "Meningitis", "Tuberculosis", "Adult Vaccinations",
   ]},
   { id: "neuro", name: "Neurology", qbank: "Nervous system", videos: [
     "Stroke I", "Stroke II", "Intracranial Bleeding", "Seizures", "Seizure Treatment",
@@ -831,7 +831,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 18 · Aug 27";
+const BUILD = "build 20 · Aug 30";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -873,6 +873,18 @@ function localStore() {
     get: async (k) => window.localStorage.getItem(k),
     set: async (k, v) => { window.localStorage.setItem(k, v); },
   };
+}
+
+async function requestPersistence() {
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      if (await navigator.storage.persisted()) return true;
+      return await navigator.storage.persist();
+    }
+  } catch (e) {
+    /* not supported — the cascade still works, it's just evictable */
+  }
+  return false;
 }
 
 async function pickBackend() {
@@ -927,7 +939,7 @@ const DEFAULT_SETTINGS = {
 
 /* Jess's log as of Aug 8 2026, restored from her export. This is the baseline
    the app ships with; the v4 migration below installs it over any older state. */
-const RESTORE = {"version":5,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","id","cards","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}}};
+const RESTORE = {"version":7,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","cards","id","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]},"2026-08-28":{"type":"normal","videosDone":["gi:hyperbilirubinemia"],"questionsDone":6},"2026-08-29":{"type":"normal","videosDone":["gi:wilsons-disease","gi:hemochromatosis"],"questionsDone":16}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}},"scores":{"gi:viral-hepatitis":{"pct":50,"date":"2026-08-28"},"gi:cirrhosis":{"pct":100,"date":"2026-08-28"},"gi:liver-masses":{"pct":33,"date":"2026-08-28"},"gi:liver-disease":{"pct":83,"date":"2026-08-28"},"gi:gastric-cancer":{"pct":80,"date":"2026-08-28"},"gi:gastric-disorders":{"pct":60,"date":"2026-08-28"},"gi:gerd-and-esophageal-cancer":{"pct":60,"date":"2026-08-28"},"gi:hyperbilirubinemia":{"pct":83,"date":"2026-08-29"},"gi:wilsons-disease":{"pct":75,"date":"2026-08-29"},"gi:hemochromatosis":{"pct":66,"date":"2026-08-29"}}};
 
 const freshState = () => JSON.parse(JSON.stringify(RESTORE));
 
@@ -937,7 +949,7 @@ function migrate(parsed) {
   parsed.preCompleted = parsed.preCompleted || [];
   parsed.extraVideos = parsed.extraVideos || {};
 
-  if (!parsed.version || parsed.version < 5) {
+  if (!parsed.version || parsed.version < 7) {
     // Install the restored baseline, keeping anything logged since the export.
     const base = JSON.parse(JSON.stringify(RESTORE));
     Object.keys(parsed.days).forEach((k) => {
@@ -955,6 +967,7 @@ function migrate(parsed) {
       base.settings.blocks = parsed.settings.blocks;
     }
     base.flags = { ...(base.flags || {}), ...(parsed.flags || {}) };
+    base.scores = { ...(base.scores || {}), ...(parsed.scores || {}) };
     // A video logged on a date shouldn't also sit in the undated pile.
     const dated = new Set(
       Object.values(base.days).flatMap((d) => d.videosDone || [])
@@ -2407,6 +2420,7 @@ export default function StudyPlanner() {
   const [tab, setTab] = useState("today");
   const [loading, setLoading] = useState(true);
   const [saveNote, setSaveNote] = useState("");
+  const [savedAt, setSavedAt] = useState(null);
   const timer = useRef(null);
   const today = dayKey(new Date());
 
@@ -2416,6 +2430,7 @@ export default function StudyPlanner() {
   useEffect(() => {
     let live = true;
     (async () => {
+      requestPersistence();
       const { state: s, error } = await loadState();
       if (!live) return;
       if (error) setSaveNote(error);
@@ -2430,6 +2445,7 @@ export default function StudyPlanner() {
     const err = await saveState(latest.current);
     dirty.current = !!err;
     setSaveNote(err || "");
+    if (!err) setSavedAt(new Date());
   };
 
   useEffect(() => {
@@ -2583,7 +2599,15 @@ export default function StudyPlanner() {
 
         <div className="mt-8 pt-4 border-t border-slate-800 font-mono text-xs text-slate-700 text-center">
           {en.completedUnits.toFixed(0)} / {en.totalUnits.toFixed(0)} units · {en.phase.label}
-          <div className="mt-1 text-slate-600">{BUILD}</div>
+          <div className="mt-1 text-slate-600">
+            {BUILD}
+            {savedAt ? (
+              <span className="text-emerald-800">
+                {" · saved "}
+                {String(savedAt.getHours()).padStart(2, "0")}:{String(savedAt.getMinutes()).padStart(2, "0")}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

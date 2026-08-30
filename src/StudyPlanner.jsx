@@ -517,7 +517,6 @@ function capacityFor(key, state) {
 function computeEngine(cur, state, today) {
   const S = state.settings;
   const flags = state.flags || {};
-  const scores = state.scores || {};
   const pre = new Set(state.preCompleted || []);
   const doneByDay = {};
   const doneIds = new Set();
@@ -752,60 +751,13 @@ function computeEngine(cur, state, today) {
     v.sketchy.forEach((sk) => strandedSketchy.push({ ...sk, from: v.title, section: v.sectionName }));
   });
 
-  // --- review priority ---
-  // Weakness x yield, tempered by how many questions actually back the number.
-  // A 1/3 on a starred topic outranks a 12/20 on an unstarred one.
-  const reviewList = [];
-  cur.flat.forEach((v) => {
-    const done = pre.has(v.id) || doneIds.has(v.id);
-    if (!done) return;
-    const sc = scores[v.id];
-    const fl = flags[v.id];
-    if (!sc && !fl) return;
-    const acc = sc && typeof sc.pct === "number" ? sc.pct : null;
-    const when = (sc && sc.date) || (fl && fl.date) || doneByDay[v.id] || null;
-    const staleDays = when ? Math.max(0, daysBetween(when, today)) : 60;
-
-    const gap = acc === null ? 45 : 100 - acc;
-    const yieldMult = v.hy ? 2 : 1;
-    const priority = gap * yieldMult + (fl ? 25 : 0) + Math.min(20, staleDays / 3);
-
-    reviewList.push({
-      id: v.id,
-      video: v,
-      acc,
-      note: fl ? fl.note : null,
-      flagged: !!fl,
-      staleDays,
-      priority: Math.round(priority),
-    });
-  });
-  reviewList.sort((a, b) => b.priority - a.priority);
-
-  // Completed videos with no accuracy data at all — unknowns, not strengths.
-  const unscored = cur.flat.filter(
-    (v) => (pre.has(v.id) || doneIds.has(v.id)) && !scores[v.id] && !flags[v.id]
-  );
-
-  // Section-level accuracy rollup.
-  const sectionAcc = cur.sections
-    .map((sec) => {
-      let sum = 0, n = 0;
-      sec.videos.forEach((v) => {
-        const sc = scores[v.id];
-        if (!sc || typeof sc.pct !== "number") return;
-        sum += sc.pct; n += 1;
-      });
-      return n ? { id: sec.id, name: sec.name, topics: n, acc: sum / n } : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.acc - b.acc);
-
   // --- flagged topics, freshest first ---
   const weakTopics = Object.keys(flags)
     .map((id) => ({ ...flags[id], id, video: cur.byId[id] }))
     .filter((x) => x.video)
-    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    .map((x) => ({ ...x, staleDays: x.date ? Math.max(0, daysBetween(x.date, today)) : 0 }))
+    // High yield first, then whatever has sat longest.
+    .sort((a, b) => (b.video.hy ? 1 : 0) - (a.video.hy ? 1 : 0) || (a.date || "").localeCompare(b.date || ""));
 
   // --- projections ---
   const projectedFinish = finishKey || (plan.length ? plan[plan.length - 1].key : today);
@@ -815,8 +767,7 @@ function computeEngine(cur, state, today) {
 
   return {
     doneIds, pre, doneByDay, remaining, remainingUnits, totalUnits, completedUnits,
-    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags, scores,
-    reviewList, unscored, sectionAcc,
+    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags,
     daysLeft: daysBetween(today, projectedFinish),
     finishedSections, recentSections,
     phase: plan.length ? plan[0].phase : phaseFor(today, state, 0),
@@ -831,7 +782,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 20 · Aug 30";
+const BUILD = "build 23 · Aug 30";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -939,7 +890,7 @@ const DEFAULT_SETTINGS = {
 
 /* Jess's log as of Aug 8 2026, restored from her export. This is the baseline
    the app ships with; the v4 migration below installs it over any older state. */
-const RESTORE = {"version":7,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","cards","id","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]},"2026-08-28":{"type":"normal","videosDone":["gi:hyperbilirubinemia"],"questionsDone":6},"2026-08-29":{"type":"normal","videosDone":["gi:wilsons-disease","gi:hemochromatosis"],"questionsDone":16}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}},"scores":{"gi:viral-hepatitis":{"pct":50,"date":"2026-08-28"},"gi:cirrhosis":{"pct":100,"date":"2026-08-28"},"gi:liver-masses":{"pct":33,"date":"2026-08-28"},"gi:liver-disease":{"pct":83,"date":"2026-08-28"},"gi:gastric-cancer":{"pct":80,"date":"2026-08-28"},"gi:gastric-disorders":{"pct":60,"date":"2026-08-28"},"gi:gerd-and-esophageal-cancer":{"pct":60,"date":"2026-08-28"},"gi:hyperbilirubinemia":{"pct":83,"date":"2026-08-29"},"gi:wilsons-disease":{"pct":75,"date":"2026-08-29"},"gi:hemochromatosis":{"pct":66,"date":"2026-08-29"}}};
+const RESTORE = {"version":7,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","cards","id","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]},"2026-08-28":{"type":"normal","videosDone":["gi:hyperbilirubinemia"],"questionsDone":6},"2026-08-29":{"type":"normal","videosDone":["gi:wilsons-disease","gi:hemochromatosis"],"questionsDone":16}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}}};
 
 const freshState = () => JSON.parse(JSON.stringify(RESTORE));
 
@@ -948,6 +899,7 @@ function migrate(parsed) {
   parsed.days = parsed.days || {};
   parsed.preCompleted = parsed.preCompleted || [];
   parsed.extraVideos = parsed.extraVideos || {};
+  parsed.notes = parsed.notes || [];
 
   if (!parsed.version || parsed.version < 7) {
     // Install the restored baseline, keeping anything logged since the export.
@@ -967,7 +919,7 @@ function migrate(parsed) {
       base.settings.blocks = parsed.settings.blocks;
     }
     base.flags = { ...(base.flags || {}), ...(parsed.flags || {}) };
-    base.scores = { ...(base.scores || {}), ...(parsed.scores || {}) };
+    base.notes = (parsed.notes || []).concat(base.notes || []);
     // A video logged on a date shouldn't also sit in the undated pile.
     const dated = new Set(
       Object.values(base.days).flatMap((d) => d.videosDone || [])
@@ -1070,41 +1022,6 @@ function Tag({ children, tone }) {
 }
 
 
-function ScoreEntry({ score, onSet, onClear, autoFocus }) {
-  const pct = score && typeof score.pct === "number" ? score.pct : "";
-  return (
-    <div className="rounded border border-slate-700 bg-slate-950 p-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs uppercase tracking-wider text-slate-500 shrink-0">% correct</span>
-        <input
-          type="number"
-          inputMode="numeric"
-          min="0"
-          max="100"
-          autoFocus={autoFocus}
-          value={pct}
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === "") return onClear();
-            const n = Math.max(0, Math.min(100, Math.round(+raw)));
-            if (!isNaN(n)) onSet(n);
-          }}
-          placeholder="—"
-          className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-lg text-slate-100 font-mono text-center focus:border-cyan-500 focus:outline-none"
-        />
-        <span className="font-mono text-lg text-slate-600 shrink-0">%</span>
-        <button
-          onClick={onClear}
-          disabled={pct === ""}
-          className="px-3 py-2 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600 disabled:opacity-40 shrink-0"
-        >
-          clear
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function Field({ label, children }) {
   return (
     <label className="block mb-3">
@@ -1124,14 +1041,6 @@ const inputCls =
 function TodayView({ cur, state, en, today, update }) {
   const nextUp = en.remaining[0];
   const [flagging, setFlagging] = useState(null);
-  const [scoring, setScoring] = useState(null);
-
-  const setScore = (id, pct) =>
-    update((st2) => {
-      st2.scores = st2.scores || {};
-      st2.scores[id] = { pct, date: today };
-    });
-  const clearScore = (id) => update((st2) => { if (st2.scores) delete st2.scores[id]; });
   const day = en.plan.find((d) => d.key === today) || en.plan[0];
   const log = state.days[today] || {};
   const doneV = new Set(log.videosDone || []);
@@ -1202,21 +1111,7 @@ function TodayView({ cur, state, en, today, update }) {
                     </Check>
                   </div>
                   <button
-                    onClick={() => { setScoring(scoring === v.id ? null : v.id); setFlagging(null); }}
-                    title="log how many you got right"
-                    className={
-                      "shrink-0 w-11 rounded border text-xs font-mono " +
-                      (en.scores[v.id]
-                        ? "border-cyan-800 bg-cyan-950 text-cyan-300"
-                        : "border-slate-800 bg-slate-900 text-slate-600 hover:text-cyan-400")
-                    }
-                  >
-                    {en.scores[v.id] && typeof en.scores[v.id].pct === "number"
-                      ? en.scores[v.id].pct + "%"
-                      : "%"}
-                  </button>
-                  <button
-                    onClick={() => { setFlagging(flagging === v.id ? null : v.id); setScoring(null); }}
+                    onClick={() => setFlagging(flagging === v.id ? null : v.id)}
                     title="flag this as shaky"
                     className={
                       "shrink-0 w-11 rounded border text-lg " +
@@ -1255,24 +1150,6 @@ function TodayView({ cur, state, en, today, update }) {
                 );
               })}
           </Block>
-
-          {scoring ? (
-            <div className="rounded border border-cyan-900 bg-slate-900 p-3">
-              <div className="text-sm text-cyan-200 mb-2">{(cur.byId[scoring] || {}).title}</div>
-              <ScoreEntry
-                autoFocus
-                score={en.scores[scoring]}
-                onSet={(n) => setScore(scoring, n)}
-                onClear={() => clearScore(scoring)}
-              />
-              <button
-                onClick={() => setScoring(null)}
-                className="mt-2 w-full py-2 rounded border border-slate-700 text-sm text-slate-300"
-              >
-                done
-              </button>
-            </div>
-          ) : null}
 
           {flagging ? (
             <div className="rounded border border-rose-900 bg-rose-950 p-3">
@@ -1402,32 +1279,6 @@ function TodayView({ cur, state, en, today, update }) {
           <Check on={!!log.cdmDone} onClick={() => setDay({ cdmDone: !log.cdmDone })}>
             CDM cases
           </Check>
-        </Block>
-      ) : null}
-
-      {!off && en.weakTopics.length ? (
-        <Block label="Flagged as shaky" note={en.weakTopics.length + " topics"}>
-          {en.weakTopics.slice(0, 6).map((w) => (
-            <div key={w.id} className="rounded border border-slate-800 bg-slate-900 p-3">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm text-slate-200">
-                  {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
-                  {w.video.title}
-                </span>
-                <button
-                  onClick={() => update((st2) => { if (st2.flags) delete st2.flags[w.id]; })}
-                  className="text-xs text-slate-600 hover:text-emerald-400 shrink-0"
-                >
-                  got it
-                </button>
-              </div>
-              {w.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{w.note}</div> : null}
-              <div className="text-xs text-slate-500 mt-1 leading-relaxed">{w.video.amboss.join(" · ")}</div>
-            </div>
-          ))}
-          {en.weakTopics.length > 6 ? (
-            <div className="text-xs text-slate-600 px-1">+{en.weakTopics.length - 6} more</div>
-          ) : null}
         </Block>
       ) : null}
 
@@ -1873,164 +1724,130 @@ function ScoreRow({ label, v, goal }) {
 
 
 /* ============================================================
-   10b. REVIEW — what to spend more time on
+   10b. REVIEW — flagged topics and anything else worth a second pass
    ============================================================ */
 
 function ReviewView({ cur, state, en, today, update }) {
-  const [open, setOpen] = useState(null);
-  const [showAll, setShowAll] = useState(false);
-  const [backfill, setBackfill] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(null);
+  const notes = state.notes || [];
 
-  const setScore = (id, pct) =>
+  const addNote = () => {
+    const t = draft.trim();
+    if (!t) return;
     update((st2) => {
-      st2.scores = st2.scores || {};
-      st2.scores[id] = { pct, date: today };
+      st2.notes = st2.notes || [];
+      st2.notes.unshift({ id: "n" + Date.now().toString(36), text: t, date: today });
     });
-  const clearScore = (id) => update((st2) => { if (st2.scores) delete st2.scores[id]; });
-
-  const list = en.reviewList;
-  const shown = showAll ? list : list.slice(0, 12);
-  const band = (p) => (p >= 60 ? "now" : p >= 30 ? "soon" : "ok");
-  const bandCls = {
-    now: "border-rose-900 bg-rose-950",
-    soon: "border-amber-900 bg-slate-900",
-    ok: "border-slate-800 bg-slate-900",
+    setDraft("");
   };
-  const accCls = (a) =>
-    a === null ? "text-slate-500" : a >= 70 ? "text-emerald-300" : a >= 50 ? "text-amber-300" : "text-rose-300";
 
   return (
-    <div className="space-y-5">
-      {!list.length ? (
-        <div className="rounded border border-slate-800 bg-slate-900 p-4 text-sm text-slate-400 leading-relaxed">
-          Nothing to rank yet. Type your percent into the <span className="font-mono text-cyan-300">%</span> button
-          next to each video on Today, and this list builds itself.
-        </div>
-      ) : (
-        <div>
-          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
-            Spend more time here
-          </div>
-          <p className="text-xs text-slate-600 mb-3 leading-relaxed">
-            Ranked by how far below 100% you are, doubled for high-yield topics, with a
-            nudge for anything flagged or gone stale.
-          </p>
+    <div className="space-y-6">
+      <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Flagged topics</div>
+        {en.weakTopics.length ? (
           <div className="space-y-2">
-            {shown.map((r) => (
-              <div key={r.id} className={"rounded border p-3 " + bandCls[band(r.priority)]}>
+            {en.weakTopics.map((w) => (
+              <div key={w.id} className="rounded border border-rose-900 bg-rose-950 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-sm text-slate-100 min-w-0">
-                    {r.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
-                    {r.video.title}
-                    {r.flagged ? <span className="text-rose-400 ml-1">⚑</span> : null}
+                    {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                    {w.video.title}
                   </span>
-                  <span className="font-mono text-sm shrink-0">
-                    <span className={accCls(r.acc)}>{r.acc === null ? "—" : r.acc + "%"}</span>
-                  </span>
+                  <button
+                    onClick={() => update((st2) => { if (st2.flags) delete st2.flags[w.id]; })}
+                    className="text-xs text-slate-500 hover:text-emerald-400 shrink-0"
+                  >
+                    got it
+                  </button>
                 </div>
                 <div className="text-xs text-slate-500 mt-1 font-mono">
-                  {r.video.sectionName}
-                  {r.staleDays >= 14 ? <span className="text-slate-600"> · {r.staleDays}d ago</span> : null}
+                  {w.video.sectionName}
+                  {w.staleDays >= 7 ? <span className="text-slate-600"> · flagged {w.staleDays}d ago</span> : null}
                 </div>
-                {r.note ? <div className="text-sm text-rose-300 mt-1 leading-snug">{r.note}</div> : null}
-                <div className="text-xs text-slate-500 mt-2 leading-relaxed">{r.video.amboss.join(" · ")}</div>
-                <div className="flex gap-2 mt-2">
-                  <button
-                    onClick={() => setOpen(open === r.id ? null : r.id)}
-                    className="flex-1 py-1.5 rounded border border-slate-700 text-xs text-slate-300 hover:border-cyan-600"
-                  >
-                    {open === r.id ? "close" : r.acc === null ? "add a score" : "change score"}
-                  </button>
-                  {r.flagged ? (
-                    <button
-                      onClick={() => update((st2) => { if (st2.flags) delete st2.flags[r.id]; })}
-                      className="px-3 py-1.5 rounded border border-slate-800 text-xs text-slate-500 hover:text-emerald-400"
-                    >
-                      unflag
-                    </button>
-                  ) : null}
-                </div>
-                {open === r.id ? (
-                  <div className="mt-2">
-                    <ScoreEntry
-                      autoFocus
-                      score={en.scores[r.id]}
-                      onSet={(n) => setScore(r.id, n)}
-                      onClear={() => clearScore(r.id)}
-                    />
-                  </div>
-                ) : null}
+                <input
+                  value={w.note || ""}
+                  onChange={(e) =>
+                    update((st2) => {
+                      st2.flags[w.id] = { note: e.target.value, date: st2.flags[w.id].date || today };
+                    })
+                  }
+                  placeholder="what tripped you up?"
+                  className="w-full mt-2 bg-slate-950 border border-rose-900 rounded px-2 py-1.5 text-sm text-rose-200 focus:border-rose-600 focus:outline-none"
+                />
+                <div className="text-xs text-slate-500 mt-2 leading-relaxed">{w.video.amboss.join(" · ")}</div>
               </div>
             ))}
           </div>
-          {list.length > 12 ? (
-            <button
-              onClick={() => setShowAll(!showAll)}
-              className="mt-2 w-full py-2 rounded border border-slate-800 text-sm text-slate-500 hover:border-slate-700"
-            >
-              {showAll ? "show top 12" : "show all " + list.length}
-            </button>
-          ) : null}
-        </div>
-      )}
-
-      {en.sectionAcc.length ? (
-        <div>
-          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Accuracy by system</div>
-          <div className="space-y-2">
-            {en.sectionAcc.map((sa) => (
-              <div key={sa.id}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-slate-300">{sa.name}</span>
-                  <span className="font-mono text-xs">
-                    <span className={accCls(sa.acc)}>{Math.round(sa.acc)}%</span>
-                    <span className="text-slate-600"> across {sa.topics}</span>
-                  </span>
-                </div>
-                <Bar pct={sa.acc} tone={sa.acc >= 70 ? "good" : sa.acc >= 50 ? "warn" : undefined} />
-              </div>
-            ))}
+        ) : (
+          <div className="rounded border border-slate-800 bg-slate-900 p-3 text-sm text-slate-500 leading-relaxed">
+            Nothing flagged. Tap <span className="text-rose-400">⚑</span> beside a video on Today when
+            something feels shaky, and it lands here.
           </div>
-        </div>
-      ) : null}
+        )}
+      </div>
 
-      {en.unscored.length ? (
-        <div>
-          <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">
-            No accuracy logged ({en.unscored.length})
-          </div>
-          <p className="text-xs text-slate-600 mb-2 leading-relaxed">
-            Watched, but never scored. These are unknowns rather than strengths — they can't
-            be ranked until there's a number behind them.
-          </p>
+      <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 mb-2">Anything else to review</div>
+        <div className="flex gap-2 mb-3">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addNote(); }}
+            placeholder="e.g. anion gap vs delta gap"
+            className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none"
+          />
           <button
-            onClick={() => setBackfill(!backfill)}
-            className="w-full py-2 rounded border border-slate-800 text-sm text-slate-400 hover:border-slate-700"
+            onClick={addNote}
+            disabled={!draft.trim()}
+            className="px-4 py-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600 disabled:opacity-40 shrink-0"
           >
-            {backfill ? "hide" : "backfill scores"}
+            add
           </button>
-          {backfill ? (
-            <div className="space-y-2 mt-2">
-              {en.unscored.map((v) => (
-                <div key={v.id} className="rounded border border-slate-800 bg-slate-900 p-3">
-                  <div className="flex items-baseline justify-between gap-2 mb-2">
-                    <span className="text-sm text-slate-200">
-                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
-                      {v.title}
-                    </span>
-                    <span className="text-xs text-slate-600 font-mono shrink-0">{v.sectionName}</span>
-                  </div>
-                  <ScoreEntry
-                    score={en.scores[v.id]}
-                    onSet={(n) => setScore(v.id, n)}
-                    onClear={() => clearScore(v.id)}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
-      ) : null}
+
+        {notes.length ? (
+          <div className="space-y-2">
+            {notes.map((n, i) => (
+              <div key={n.id} className="rounded border border-slate-800 bg-slate-900 p-3">
+                {editing === n.id ? (
+                  <textarea
+                    autoFocus
+                    value={n.text}
+                    onChange={(e) => update((st2) => { st2.notes[i].text = e.target.value; })}
+                    onBlur={() => setEditing(null)}
+                    rows={3}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none resize-y"
+                  />
+                ) : (
+                  <div className="text-sm text-slate-200 leading-snug whitespace-pre-wrap">{n.text}</div>
+                )}
+                <div className="flex items-center gap-3 mt-2">
+                  <span className="text-xs text-slate-600 font-mono flex-1">{fmtShort(n.date)}</span>
+                  <button
+                    onClick={() => setEditing(editing === n.id ? null : n.id)}
+                    className="text-xs text-slate-500 hover:text-cyan-300"
+                  >
+                    {editing === n.id ? "done" : "edit"}
+                  </button>
+                  <button
+                    onClick={() => update((st2) => { st2.notes = st2.notes.filter((x) => x.id !== n.id); })}
+                    className="text-xs text-slate-600 hover:text-rose-400"
+                  >
+                    remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-slate-600 leading-relaxed">
+            Jot down anything you want to come back to — a concept, a drug class, a question you
+            got wrong that isn't tied to one video.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2493,7 +2310,6 @@ export default function StudyPlanner() {
   }
 
   const behind = en.delta < -0.01;
-  const ahead = en.delta > 0.01;
   const gapSections = cur.sections.filter((s) => s.videos.length === 0);
   const pace = state.settings.weekdayVideos * 5 + state.settings.satVideos + state.settings.sunVideos;
 
@@ -2520,16 +2336,9 @@ export default function StudyPlanner() {
           <Stat label="finish" value={fmtShort(en.projectedFinish)} />
         </div>
 
-        {behind || ahead ? (
-          <div
-            className={
-              "rounded border px-3 py-2 mb-3 text-sm " +
-              (behind ? "border-slate-700 bg-slate-900 text-slate-300" : "border-emerald-900 bg-emerald-950 text-emerald-200")
-            }
-          >
-            {behind
-              ? `${Math.abs(en.delta)} video${Math.abs(en.delta) === 1 ? "" : "s"} behind — spread across the next ${state.settings.catchUpWindowDays} days.`
-              : `${en.delta} video${en.delta === 1 ? "" : "s"} ahead — finishing ${fmtFinish(en.projectedFinish)}. Pace stays the same.`}
+        {behind ? (
+          <div className="rounded border border-slate-700 bg-slate-900 px-3 py-2 mb-3 text-sm text-slate-300">
+            {`${Math.abs(en.delta)} video${Math.abs(en.delta) === 1 ? "" : "s"} behind — spread across the next ${state.settings.catchUpWindowDays} days.`}
           </div>
         ) : null}
 

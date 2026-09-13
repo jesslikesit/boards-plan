@@ -159,6 +159,51 @@ const slugMissing = () => {
   return Array.from(HY).filter((id) => !real.has(id));
 };
 
+/* The 25 topics that carry the most weight on Level 3, mapped to the B&B
+   videos that cover them. Titles are validated against SECTIONS at load. */
+const TIER1 = [
+  ["ACS / STEMI", "cards", ["Coronary Artery Disease", "STEMI"]],
+  ["Arrhythmias / ACLS", "cards", ["EKG Interpretation", "ACLS and Tachycardias", "Atrial Fibrillation and Flutter", "Bradycardia"]],
+  ["Heart failure", "cards", ["Heart Failure I", "Heart Failure II", "Cardiomyopathy"]],
+  ["Hypertension", "cards", ["Hypertension", "Cardiovascular Pharmacology I"]],
+  ["Asthma / COPD", "pulm", ["Asthma", "COPD Diagnosis", "COPD Treatment"]],
+  ["Pneumonia", "pulm", ["Pneumonia"]],
+  ["PE / DVT", "pulm", ["DVT and Pulmonary Embolism"], [["heme", ["Hypercoagulable States", "Anticoagulants"]]]],
+  ["Shock", "pulm", ["Shock"]],
+  ["Sepsis / ARDS", "pulm", ["Sepsis ARDS", "Respiratory Failure"]],
+  ["AKI", "renal", ["Acute Renal Failure", "Tubulointerstitial Disorders"]],
+  ["Sodium disorders", "renal", ["Hyponatremia", "Hypernatremia"]],
+  ["Potassium disorders", "renal", ["Potassium Disorders"]],
+  ["Acid-base", "renal", ["Acid Base Principles", "Metabolic Acidosis", "Metabolic Alkalosis", "Respiratory Acid Base Disorders"]],
+  ["Diabetes + DKA / HHS", "endo", ["Diabetes Mellitus", "Diabetes Complications", "Diabetic Ketoacidosis", "Insulin", "Diabetes Treatment"]],
+  ["Thyroid disease", "endo", ["Thyroid Hormone", "Hypothyroidism", "Hyperthyroidism", "Thyroid Nodules"]],
+  ["GI bleeding", "gi", ["Gastrointestinal Bleeding"]],
+  ["Cirrhosis", "gi", ["Cirrhosis", "Liver Disease"]],
+  ["Gallbladder disease / pancreatitis", "gi", ["Biliary Disease", "Gallstone Disease", "Pancreatitis"]],
+  ["Stroke", "neuro", ["Stroke I", "Stroke II", "Intracranial Bleeding"]],
+  ["Seizures / status epilepticus", "neuro", ["Seizures", "Seizure Treatment"]],
+  ["Antibiotics / common infections", "id", ["Penicillins", "Beta Lactams", "Protein Synthesis Inhibitors", "Other Antibiotics", "Meningitis", "Sexually-transmitted Infections"], [["renal", ["Urinary Infections"]]]],
+  ["Pregnancy emergencies + labor", "obgyn", ["Ectopic Pregnancy", "Labor and Delivery I", "Labor and Delivery II", "Intrapartum Fetal Monitoring", "Labor and Delivery Complications", "Hypertension in Pregnancy", "Postpartum"]],
+  ["Newborn / peds screening / vaccines", "peds", ["Delivery Room Care", "Newborn Nursery", "Newborn Hyperbilirubinemia", "Developmental Milestones", "Pediatric Screening", "Vaccination"]],
+  ["Depression / mania / psychosis / withdrawal", "psych", ["Depression", "Mania", "Psychotic Disorders", "Alcohol Use Disorder", "Substance Abuse I", "Substance Abuse II"]],
+  ["Biostats + ethics + patient safety", "epi", ["Study Designs", "Sensitivity and Specificity", "Predictive Values", "Bias", "Clinical Trials", "Evidence Based Medicine"], [["behav", ["Informed Consent", "Decision-Making Capacity", "Confidentiality", "Safety", "Quality"]]]],
+];
+
+const TIER1_TOPICS = TIER1.map(([name, sec, titles, extra]) => ({
+  name,
+  ids: titles
+    .map((t) => vid(sec, t))
+    .concat((extra || []).flatMap(([s2, ts]) => ts.map((t) => vid(s2, t)))),
+}));
+
+const T1 = new Set(TIER1_TOPICS.flatMap((t) => t.ids));
+
+const tier1Missing = () => {
+  const real = new Set();
+  SECTIONS.forEach((s) => s.videos.forEach((t) => real.add(vid(s.id, t))));
+  return Array.from(T1).filter((id) => !real.has(id));
+};
+
 /* Workload weights. Everything defaults to 1 unit. */
 const EST = {
   "cards:ekg-interpretation": 2,
@@ -453,6 +498,7 @@ function buildCurriculum(state) {
             qbank: s.qbank,
             est: EST[v] || 1,
             hy: HY.has(v),
+            t1: T1.has(v),
             sketchy: SKETCHY[v] || [],
             amboss: AMBOSS[v] || [title],
           };
@@ -474,6 +520,29 @@ const PHASES = [
   { id: "mixing", label: "Older-review build", until: "2026-11-30", pass2: 6, pass3: 7, p2: [5, 6], p3: [6, 8] },
   { id: "convergence", label: "Transition", until: null, pass2: 12, pass3: 12, p2: [10, 15], p3: [10, 15] },
 ];
+/* Weekend structure, by date.
+   Sat carries one big mixed block drawn from completed systems.
+   Sun carries CDM cases instead of older-system questions. */
+const MIXED_FROM = "2026-09-14";
+const RAMP_START = "2026-09-28";
+const RAMP_END = "2026-11-08";
+
+function satMixedFor(key, S) {
+  if (key < MIXED_FROM) return 0;
+  if (key < RAMP_START) return S.satMixedStart;
+  if (key > RAMP_END) return S.satMixedEnd;
+  const span = daysBetween(RAMP_START, RAMP_END) || 1;
+  const t = daysBetween(RAMP_START, key) / span;
+  return Math.round(S.satMixedStart + t * (S.satMixedEnd - S.satMixedStart));
+}
+
+function cdmFor(key) {
+  if (key < MIXED_FROM) return null;
+  if (key < "2026-11-01") return [2, 2];
+  if (key < "2026-12-15") return [3, 4];
+  return [4, 5];
+}
+
 const RANDOM_PHASE = { id: "random", label: "Fully random", pass2: 0, pass3: 0, p2: [0, 0], p3: [0, 0] };
 
 function phaseFor(key, state, videosLeft) {
@@ -639,6 +708,35 @@ function computeEngine(cur, state, today) {
     }
   }
 
+  // Past days get the same shape as planned ones, reconstructed from the log,
+  // so the Week view can still show what a finished day asked for.
+  const history = [];
+  if (today > S.startDate) {
+    for (let k = S.startDate; k < today; k = addDays(k, 1)) {
+      const vids = loggedOn[k] || [];
+      const type = dayType(k, state);
+      const sketchy = [];
+      vids.forEach((v) => v.sketchy.forEach((sk) => sketchy.push({ ...sk, from: v.title })));
+      history.push({
+        key: k,
+        past: true,
+        block: blockFor(k, S),
+        isRandom: false,
+        videos: vids,
+        sketchy,
+        type,
+        phase: phaseFor(k, state, 1),
+        pass1: vids.length * 3,
+        pass1Planned: vids.length * 3,
+        minutes: Math.round(
+          vids.reduce((a, v) => a + v.est * S.minPerVideo, 0) +
+            sketchy.length * S.minPerSketchy +
+            vids.length * 3 * S.minPerQuestion
+        ),
+      });
+    }
+  }
+
   // --- spread Sketchy overflow forward so one day never carries 11 ---
   let sCarry = [];
   plan.forEach((day) => {
@@ -658,8 +756,9 @@ function computeEngine(cur, state, today) {
   const sketchyBacklog = sCarry.length;
 
   // --- weekend mixed-question blocks ---
+  const allDays = history.concat(plan);
   const planByKey = {};
-  plan.forEach((d) => (planByKey[d.key] = d));
+  allDays.forEach((d) => (planByKey[d.key] = d));
   const videoDay = {};
   plan.forEach((d) => d.videos.forEach((v) => (videoDay[v.id] = d.key)));
 
@@ -692,7 +791,7 @@ function computeEngine(cur, state, today) {
   const recentSections = [];
 
   // Pass 2 — every day, from exactly one week back: 2 questions per video studied.
-  plan.forEach((day) => {
+  allDays.forEach((day) => {
     if (day.type === "off" || day.isRandom) return;
     const per = S.pass2PerVideo;
     const back = dayVideos(addDays(day.key, -7));
@@ -712,36 +811,32 @@ function computeEngine(cur, state, today) {
     back.forEach((v) => recentSections.includes(v.sectionName) || recentSections.push(v.sectionName));
   });
 
-  plan.forEach((day) => {
-    if (!isWeekend(day.key) || day.type === "off" || day.isRandom) return;
+  allDays.forEach((day) => {
+    if (day.type === "off") return;
     const k = day.key;
-    const ph = day.phase;
+    const g = parseKey(k).getDay();
 
-    // Pass 3 — rotate the stalest finished systems so none goes untouched.
-    const eligible = Object.values(sectionDone).filter((x) => x.last < k).sort((a, b) => a.last.localeCompare(b.last));
-    const picks = [];
-    if (eligible.length) {
-      const wk = Math.floor(Math.max(0, daysBetween(today, k)) / 7);
-      const off = parseKey(k).getDay() === 6 ? 0 : 1;
-      const take = Math.min(2, eligible.length);
-      for (let j = 0; j < take; j++) {
-        const sec = eligible[(wk * 2 + off + j) % eligible.length];
-        if (!picks.some((x) => x.name === sec.name)) picks.push(sec);
-      }
+    if (g === 6) {
+      // Saturday — one mixed block spanning every system already finished.
+      const n = satMixedFor(k, S);
+      const eligible = Object.values(sectionDone)
+        .filter((x) => x.last < k)
+        .sort((a, b) => a.last.localeCompare(b.last));
+      if (!n || !eligible.length) return;
+      day.mixed = {
+        n,
+        sources: eligible.map((x) => ({
+          name: x.name,
+          qbank: x.qbank,
+          // Anything flagged in that system leads the topic list.
+          weak: x.videos.filter((v) => flags[v.id]).map((v) => v.title),
+        })),
+      };
+    } else if (g === 0) {
+      // Sunday — CDM cases replace older-system questions.
+      const c = cdmFor(k);
+      if (c) day.cdm = { lo: c[0], hi: c[1] };
     }
-    day.pass3 = {
-      n: Math.round(ph.pass3 / 2),
-      sources: picks.map((x) => x.name),
-      detail: picks.map((x) => ({
-        name: x.name,
-        qbank: x.qbank,
-        // Anything flagged in this system leads; otherwise show a sample.
-        topics: (x.videos.filter((v) => flags[v.id]).map((v) => v.title).concat(
-          x.videos.filter((v) => !flags[v.id]).map((v) => v.title)
-        )).slice(0, 3),
-        weak: x.videos.filter((v) => flags[v.id]).map((v) => v.title),
-      })),
-    };
   });
 
   // --- Sketchy attached to videos finished before the plan started ---
@@ -767,7 +862,7 @@ function computeEngine(cur, state, today) {
 
   return {
     doneIds, pre, doneByDay, remaining, remainingUnits, totalUnits, completedUnits,
-    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags,
+    delta, expected, loggedUnits, plan, projectedFinish, requiredWeekly, currentWeekly, sketchyBacklog, strandedSketchy, weakTopics, flags, history, planByKey, videoDay,
     daysLeft: daysBetween(today, projectedFinish),
     finishedSections, recentSections,
     phase: plan.length ? plan[0].phase : phaseFor(today, state, 0),
@@ -782,7 +877,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 23 · Aug 30";
+const BUILD = "build 28 · Sep 13";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -824,6 +919,20 @@ function localStore() {
     get: async (k) => window.localStorage.getItem(k),
     set: async (k, v) => { window.localStorage.setItem(k, v); },
   };
+}
+
+async function storageReport() {
+  const out = { backend: BACKEND ? BACKEND.name : null, persisted: null, usageKB: null };
+  try {
+    if (navigator.storage && navigator.storage.persisted) out.persisted = await navigator.storage.persisted();
+    if (navigator.storage && navigator.storage.estimate) {
+      const e = await navigator.storage.estimate();
+      if (e && e.usage) out.usageKB = Math.round(e.usage / 1024);
+    }
+  } catch (e) {
+    /* not supported */
+  }
+  return out;
 }
 
 async function requestPersistence() {
@@ -874,6 +983,8 @@ const DEFAULT_SETTINGS = {
   maxWeekdayUnits: 3,
   maxWeekendUnits: 6,
   maxSketchyPerDay: 4,
+  satMixedStart: 20,
+  satMixedEnd: 35,
   pass2PerVideo: 2,
   randomWorkdayQ: 12,
   randomWeekendQ: 25,
@@ -890,9 +1001,14 @@ const DEFAULT_SETTINGS = {
 
 /* Jess's log as of Aug 8 2026, restored from her export. This is the baseline
    the app ships with; the v4 migration below installs it over any older state. */
-const RESTORE = {"version":7,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","cards","id","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]},"2026-08-28":{"type":"normal","videosDone":["gi:hyperbilirubinemia"],"questionsDone":6},"2026-08-29":{"type":"normal","videosDone":["gi:wilsons-disease","gi:hemochromatosis"],"questionsDone":16}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}}};
+const RESTORE = {"version":8,"settings":{"startDate":"2026-08-05","targetFinishDate":"2026-12-31","paceMode":"fixed","weekdayVideos":1,"satVideos":3,"sunVideos":3,"catchUpWindowDays":7,"maxWeekdayUnits":3,"maxWeekendUnits":6,"maxSketchyPerDay":4,"pass2PerVideo":2,"randomWorkdayQ":12,"randomWeekendQ":25,"cdmPerWeek":3,"randomTailDays":70,"dailyMinutesWarn":90,"minPerVideo":18,"minPerSketchy":12,"minPerQuestion":2,"phaseOverride":null,"blocks":[{"id":"b1786202891935ovsk","label":"Inpatient","start":"2026-08-08","end":"2026-09-30","weekday":1,"sat":2,"sun":2},{"id":"b1786202981065eafd","label":"Vacation","start":"2026-10-01","end":"2026-10-31","weekday":2,"sat":3,"sun":3},{"id":"b178620307680917uv","label":"Vacation","start":"2026-12-01","end":"2026-12-31","weekday":2,"sat":3,"sun":3}],"sectionOrder":["pulm","renal","gi","cards","id","neuro","heme","psych","endo","msk","peds","obgyn","surg","em","behav","epi"]},"days":{"2026-07-20":{"type":"normal","videosDone":["pulm:asthma"]},"2026-07-21":{"type":"normal","videosDone":["pulm:copd-diagnosis"]},"2026-07-22":{"type":"normal","videosDone":["pulm:copd-treatment"]},"2026-07-23":{"type":"normal","videosDone":["pulm:restrictive-lung-disease"]},"2026-07-24":{"type":"normal","videosDone":["pulm:pneumonia"]},"2026-07-25":{"type":"normal","videosDone":["pulm:lung-cancer","pulm:bronchiectasis","pulm:shock"]},"2026-07-26":{"type":"normal","videosDone":["pulm:respiratory-failure","pulm:sepsis-ards"]},"2026-07-27":{"type":"normal","videosDone":["pulm:pulmonary-hypertension"]},"2026-07-28":{"type":"normal","videosDone":["pulm:dvt-and-pulmonary-embolism"]},"2026-07-29":{"type":"normal","videosDone":["pulm:pleural-disease"]},"2026-08-05":{"type":"normal","videosDone":["pulm:cystic-fibrosis","renal:acute-renal-failure","renal:chronic-kidney-disease","renal:fluids","renal:hyponatremia","renal:hypernatremia"],"sketchyDone":["path:Osmolality and sodium disorders"]},"2026-08-06":{"type":"normal","videosDone":["renal:potassium-disorders"],"questionsDone":3},"2026-08-07":{"type":"normal","videosDone":["renal:calcium-magnesium-and-phosphate-disorders"],"questionsDone":15},"2026-08-08":{"type":"normal","videosDone":["renal:acid-base-principles","renal:metabolic-acidosis"],"questionsDone":12},"2026-08-09":{"type":"normal","videosDone":["renal:metabolic-alkalosis","renal:respiratory-acid-base-disorders","renal:renal-tubular-acidosis"],"questionsDone":9},"2026-08-10":{"type":"normal","videosDone":["renal:nephrotic-syndrome"],"sketchyDone":["path:Nephrotic syndrome"],"questionsDone":7},"2026-08-11":{"type":"normal","videosDone":["renal:nephritic-syndrome"],"sketchyDone":["path:Nephritic syndrome"],"questionsDone":7},"2026-08-12":{"type":"normal","videosDone":["renal:rpgn"]},"2026-08-14":{"type":"normal","videosDone":["renal:nephrolithiasis"]},"2026-08-15":{"type":"normal","questionsDone":30,"videosDone":["renal:hematuria"]},"2026-08-16":{"type":"normal","videosDone":["renal:urinary-infections","renal:urinary-incontinence"],"questionsDone":15},"2026-08-17":{"type":"normal","videosDone":["renal:tubulointerstitial-disorders"]},"2026-08-18":{"type":"normal","videosDone":["renal:cystic-kidney-disease","renal:urinary-tract-malignancy"],"questionsDone":13},"2026-08-19":{"type":"normal","videosDone":["renal:diuretics"],"sketchyDone":["pharm:Loop diuretics","pharm:Thiazides","pharm:Potassium-sparing diuretics"]},"2026-08-20":{"type":"normal","videosDone":["renal:rhabdomyolysis"],"questionsDone":3},"2026-08-21":{"type":"normal","videosDone":["gi:esophageal-disorders"]},"2026-08-22":{"type":"normal","videosDone":["gi:gerd-and-esophageal-cancer","gi:gastric-disorders"],"questionsDone":12},"2026-08-23":{"type":"normal","videosDone":["gi:gastric-cancer"],"questionsDone":3},"2026-08-24":{"type":"normal","videosDone":["gi:liver-disease","gi:liver-masses"],"questionsDone":12},"2026-08-25":{"type":"normal","videosDone":["gi:cirrhosis"],"questionsDone":10},"2026-08-26":{"type":"normal","videosDone":["gi:viral-hepatitis"],"sketchyDone":["micro:Hepatitis B"]},"2026-08-28":{"type":"normal","videosDone":["gi:hyperbilirubinemia"],"questionsDone":6},"2026-08-29":{"type":"normal","videosDone":["gi:wilsons-disease","gi:hemochromatosis"],"questionsDone":16},"2026-08-30":{"type":"normal","videosDone":["gi:biliary-disease","gi:gallstone-disease"],"questionsDone":11},"2026-08-31":{"type":"normal","videosDone":["gi:pancreatic-cancer"],"questionsDone":9},"2026-09-01":{"type":"normal","videosDone":["gi:pancreatitis"],"questionsDone":6},"2026-09-02":{"type":"normal","videosDone":["gi:colon-cancer"],"questionsDone":12},"2026-09-03":{"type":"normal","videosDone":["gi:colorectal-disease"],"questionsDone":6},"2026-09-04":{"type":"off"},"2026-09-05":{"type":"normal","videosDone":["gi:small-bowel-disease","gi:inflammatory-bowel-disease","gi:diarrhea"],"questionsDone":27},"2026-09-06":{"type":"normal","videosDone":["gi:gastrointestinal-bleeding"],"questionsDone":10},"2026-09-07":{"type":"normal","videosDone":["gi:hernias"],"questionsDone":6},"2026-09-08":{"type":"normal","videosDone":["gi:malabsorption"],"questionsDone":9},"2026-09-09":{"type":"normal","videosDone":["gi:gastrointestinal-pharmacology"],"questionsDone":7},"2026-09-10":{"type":"normal","videosDone":["cards:ekg-interpretation"],"questionsDone":4},"2026-09-11":{"type":"normal","videosDone":["cards:acls-and-tachycardias"],"questionsDone":7},"2026-09-12":{"type":"normal","videosDone":["cards:atrial-fibrillation-and-flutter","cards:bradycardia"],"questionsDone":11},"2026-09-13":{"type":"normal","questionsDone":8}},"preCompleted":["endo:thyroid-hormone","endo:hypothyroidism","endo:hyperthyroidism","endo:thyroid-nodules","endo:hyperaldosteronism","endo:cushing-syndrome","endo:adrenal-insufficiency","endo:diabetes-mellitus","endo:diabetes-complications","endo:diabetic-ketoacidosis","endo:insulin","endo:diabetes-treatment","endo:pituitary-gland","endo:hyperparathyroidism","endo:hypoparathyroidism-and-vitamin-d","endo:osteoporosis","pulm:pulmonary-function-tests"],"extraVideos":{},"flags":{"renal:nephritic-syndrome":{"note":"Treatment options for all","date":"2026-08-11"}},"notes":[{"id":"nmtyp7wen","text":"ACLS + tachyarrhythmias","date":"2026-09-12"},{"id":"nmth887zq","text":"Hyponatremia","date":"2026-08-31"}]};
 
-const freshState = () => JSON.parse(JSON.stringify(RESTORE));
+const freshState = () => {
+  const base = JSON.parse(JSON.stringify(RESTORE));
+  // The baseline predates some settings, so fill in anything it lacks.
+  base.settings = { ...DEFAULT_SETTINGS, ...base.settings };
+  return base;
+};
 
 function migrate(parsed) {
   parsed.settings = { ...DEFAULT_SETTINGS, ...parsed.settings };
@@ -901,7 +1017,7 @@ function migrate(parsed) {
   parsed.extraVideos = parsed.extraVideos || {};
   parsed.notes = parsed.notes || [];
 
-  if (!parsed.version || parsed.version < 7) {
+  if (!parsed.version || parsed.version < 8) {
     // Install the restored baseline, keeping anything logged since the export.
     const base = JSON.parse(JSON.stringify(RESTORE));
     Object.keys(parsed.days).forEach((k) => {
@@ -955,6 +1071,24 @@ async function saveState(s) {
     return null;
   } catch (e) {
     return (e && e.message ? e.message : String(e)) + " (" + b.name + ")";
+  }
+}
+
+function downloadBackup(state) {
+  try {
+    const name = "board-plan-" + dayKey(new Date()) + ".json";
+    const blob = new Blob([JSON.stringify(state)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return name;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -1103,7 +1237,7 @@ function TodayView({ cur, state, en, today, update }) {
                     <Check
                       on={doneV.has(v.id)}
                       onClick={() => toggleV(v.id)}
-                      sub={v.hy ? v.sectionName + " · high yield" : v.sectionName}
+                      sub={v.t1 ? v.sectionName + " · top 25" : v.hy ? v.sectionName + " · high yield" : v.sectionName}
                     >
                       {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
                       {v.title}
@@ -1257,30 +1391,58 @@ function TodayView({ cur, state, en, today, update }) {
             </Block>
           ) : null}
 
-          {day.pass3 && day.pass3.n && day.pass3.detail.length ? (
-            <Block label="Older systems" note={day.pass3.n + " questions"}>
-              {day.pass3.detail.map((x) => (
-                <div key={x.name} className="rounded border border-slate-800 bg-slate-900 p-3">
-                  <div className="text-sm text-slate-200 mb-1">{x.name}</div>
-                  <div className="text-sm text-slate-300 font-mono">{x.qbank}</div>
-                  <div className="text-xs text-slate-500 mt-2 leading-relaxed">
-                    random across the system — e.g. {x.topics.join(", ")}
-                  </div>
+          {day.mixed ? (
+            <Block label="Mixed review" note={day.mixed.n + " questions"}>
+              <div className="rounded border border-slate-800 bg-slate-900 p-3">
+                <div className="text-xs uppercase tracking-wider text-slate-500 mb-1">
+                  Random across every finished system
                 </div>
-              ))}
+                {day.mixed.sources.map((x) => (
+                  <div key={x.name} className="mt-1">
+                    <div className="text-sm text-slate-200">{x.name}</div>
+                    <div className="text-sm text-slate-400 font-mono">{x.qbank}</div>
+                    {x.weak.length ? (
+                      <div className="text-xs text-rose-300 mt-0.5">flagged: {x.weak.join(", ")}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </Block>
+          ) : null}
+
+          {day.cdm ? (
+            <Block
+              label="COMLEX CDM"
+              note={day.cdm.lo === day.cdm.hi ? day.cdm.lo + " cases" : day.cdm.lo + "\u2013" + day.cdm.hi + " cases"}
+            >
+              <div className="rounded border border-slate-800 bg-slate-900 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono text-2xl text-cyan-300">{log.cdmDone || 0}</span>
+                  <span className="font-mono text-xs text-slate-500">
+                    of {day.cdm.lo === day.cdm.hi ? day.cdm.lo : day.cdm.lo + "\u2013" + day.cdm.hi}
+                  </span>
+                </div>
+                <Bar pct={((log.cdmDone || 0) / Math.max(1, day.cdm.hi)) * 100} />
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => setDay({ cdmDone: (log.cdmDone || 0) + 1 })}
+                    className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-cyan-600 font-mono"
+                  >
+                    +1
+                  </button>
+                  <button
+                    onClick={() => setDay({ cdmDone: 0 })}
+                    className="px-3 py-2 rounded border border-slate-800 text-xs text-slate-500 hover:border-slate-600"
+                  >
+                    reset
+                  </button>
+                </div>
+              </div>
             </Block>
           ) : null}
 
         </>
       )}
-
-      {!off && day.isRandom ? (
-        <Block label="COMLEX CDM" note={S.cdmPerWeek + "x per week"}>
-          <Check on={!!log.cdmDone} onClick={() => setDay({ cdmDone: !log.cdmDone })}>
-            CDM cases
-          </Check>
-        </Block>
-      ) : null}
 
       <div className="pt-2">
         <button
@@ -1336,7 +1498,7 @@ function WeekView({ cur, state, en, today, update, setTab }) {
   for (let i = 0; i < 7; i++) week.push(addDays(start, i));
 
   const rows = week.map((k) => {
-    const planned = en.plan.find((d) => d.key === k);
+    const planned = en.planByKey[k];
     const log = state.days[k] || {};
     const logged = (log.videosDone || []).map((id) => cur.byId[id]).filter(Boolean);
     // The plan only runs forward from today, so past days come from the log.
@@ -1465,7 +1627,12 @@ function WeekView({ cur, state, en, today, update, setTab }) {
                 <span className="text-slate-600 ml-1">{editingQ === k ? "−" : "＋"}</span>
               </button>
               {planned && planned.pass2 && planned.pass2.n ? <span>+{planned.pass2.n} recent</span> : null}
-              {planned && planned.pass3 && planned.pass3.n ? <span>+{planned.pass3.n} older</span> : null}
+              {planned && planned.mixed ? <span>+{planned.mixed.n} mixed</span> : null}
+              {planned && planned.cdm ? (
+                <span className={log.cdmDone ? "text-cyan-400" : ""}>
+                  {log.cdmDone || 0}/{planned.cdm.hi} CDM
+                </span>
+              ) : null}
             </div>
 
             {editingQ === k ? (
@@ -1509,8 +1676,10 @@ function WeekView({ cur, state, en, today, update, setTab }) {
             {planned && planned.pass2 && planned.pass2.n ? (
               <div className="text-xs text-slate-600 mt-1">recent: {planned.pass2.topics.join(", ")}</div>
             ) : null}
-            {planned && planned.pass3 && planned.pass3.sources.length ? (
-              <div className="text-xs text-slate-600 mt-1">older: {planned.pass3.sources.join(", ")}</div>
+            {planned && planned.mixed ? (
+              <div className="text-xs text-slate-600 mt-1">
+                mixed: {planned.mixed.sources.map((x) => x.name).join(", ")}
+              </div>
             ) : null}
           </div>
         );
@@ -1853,10 +2022,108 @@ function ReviewView({ cur, state, en, today, update }) {
 }
 
 /* ============================================================
+   10c. TOP 25 — the topics that carry the most weight
+   ============================================================ */
+
+function TopView({ cur, state, en, today }) {
+  const [open, setOpen] = useState(null);
+
+  const rows = TIER1_TOPICS.map((t) => {
+    const vids = t.ids.map((id) => cur.byId[id]).filter(Boolean);
+    const done = vids.filter((v) => en.doneIds.has(v.id) || en.pre.has(v.id));
+    const left = vids.filter((v) => !en.doneIds.has(v.id) && !en.pre.has(v.id));
+    const dates = left.map((v) => en.videoDay[v.id]).filter(Boolean).sort();
+    return { ...t, vids, done: done.length, total: vids.length, left, next: dates[0] || null };
+  });
+
+  const covered = rows.reduce((a, r) => a + r.done, 0);
+  const total = rows.reduce((a, r) => a + r.total, 0);
+  const finished = rows.filter((r) => r.done === r.total).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded border border-amber-900 bg-slate-900 p-3">
+        <div className="text-sm text-amber-200 mb-1">The 25 that matter most</div>
+        <div className="text-xs text-slate-400 leading-relaxed mb-2">
+          If time runs short, these are the ones to protect. Everything else is secondary.
+        </div>
+        <div className="flex justify-between items-baseline mb-1">
+          <span className="text-xs text-slate-500 font-mono">{finished} of 25 topics fully covered</span>
+          <span className="font-mono text-xs text-amber-300">{covered}/{total} videos</span>
+        </div>
+        <Bar pct={(covered / total) * 100} tone={covered === total ? "good" : "warn"} />
+      </div>
+
+      <div className="space-y-2">
+        {rows.map((r) => {
+          const complete = r.done === r.total;
+          const started = r.done > 0;
+          return (
+            <div
+              key={r.name}
+              className={
+                "rounded border " +
+                (complete ? "border-emerald-900 bg-slate-900" : started ? "border-amber-900 bg-slate-900" : "border-slate-800 bg-slate-950")
+              }
+            >
+              <button
+                onClick={() => setOpen(open === r.name ? null : r.name)}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+              >
+                <span className={"flex-1 text-sm min-w-0 " + (complete ? "text-slate-400" : "text-slate-100")}>
+                  {r.name}
+                </span>
+                <span className={"font-mono text-xs shrink-0 " + (complete ? "text-emerald-400" : "text-slate-500")}>
+                  {r.done}/{r.total}
+                </span>
+                <span className="text-slate-600 shrink-0">{open === r.name ? "−" : "+"}</span>
+              </button>
+
+              {!complete && r.next ? (
+                <div className="px-3 pb-2 -mt-1 text-xs text-slate-500 font-mono">
+                  next {fmtShort(r.next)}
+                </div>
+              ) : null}
+
+              {open === r.name ? (
+                <div className="px-3 pb-3 pt-2 border-t border-slate-800 space-y-1">
+                  {r.vids.map((v) => {
+                    const isDone = en.doneIds.has(v.id) || en.pre.has(v.id);
+                    const when = en.doneByDay[v.id] || en.videoDay[v.id];
+                    return (
+                      <div key={v.id} className="flex items-baseline gap-2 text-sm">
+                        <span className={"shrink-0 " + (isDone ? "text-emerald-500" : "text-slate-700")}>
+                          {isDone ? "✓" : "○"}
+                        </span>
+                        <span className={"flex-1 min-w-0 " + (isDone ? "text-slate-500" : "text-slate-200")}>
+                          {v.title}
+                          {en.flags[v.id] ? <span className="text-rose-400 ml-1">⚑</span> : null}
+                        </span>
+                        <span className="text-xs text-slate-600 font-mono shrink-0">
+                          {when ? fmtShort(when) : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className="text-xs text-slate-600 pt-1 font-mono">
+                    {r.vids[0] ? r.vids[0].qbank : ""}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    11. SETUP
    ============================================================ */
 
-function SetupView({ cur, state, en, update, reload }) {
+function SetupView({ cur, state, en, update, reload, today, storageInfo }) {
+  const lastBackup = state.lastBackup || null;
   const S = state.settings;
   const [addTo, setAddTo] = useState("endo");
   const [addText, setAddText] = useState("");
@@ -2132,82 +2399,129 @@ function SetupView({ cur, state, en, update, reload }) {
       </Group>
 
       <Group title="Backup">
-        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-          Copy this somewhere safe before reinstalling the app.
-        </p>
-        <div className="flex gap-2 mb-2">
-          <button
-            onClick={() => { setIo(JSON.stringify(state)); setNote(""); }}
-            className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-          >
-            Export
-          </button>
-          <button
-            onClick={async () => {
-              const text = io && io.charAt(0) === "{" ? io : JSON.stringify(state);
-              setIo(text);
-              try {
-                await navigator.clipboard.writeText(text);
-                setNote("Copied " + text.length + " characters to the clipboard.");
-              } catch (e) {
-                setNote("Couldn't reach the clipboard — tap in the box, select all, copy.");
-              }
-            }}
-            className="flex-1 py-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600"
-          >
-            Copy
-          </button>
+        <div className="rounded border border-slate-800 bg-slate-950 p-3 mb-3 text-xs font-mono leading-relaxed">
+          <div className="text-slate-400">
+            storing in <span className="text-cyan-300">{storageInfo && storageInfo.backend ? storageInfo.backend : "…"}</span>
+          </div>
+          {storageInfo && storageInfo.persisted !== null ? (
+            <div className={storageInfo.persisted ? "text-emerald-400" : "text-amber-400"}>
+              {storageInfo.persisted
+                ? "persistent — the browser won't evict this"
+                : "not marked persistent — could be evicted if the device runs low"}
+            </div>
+          ) : null}
+          {lastBackup ? (
+            <div className={daysBetween(lastBackup, today) > 14 ? "text-amber-400" : "text-slate-500"}>
+              last saved to a file {daysBetween(lastBackup, today) === 0 ? "today" : daysBetween(lastBackup, today) + "d ago"}
+            </div>
+          ) : (
+            <div className="text-amber-400">never saved to a file</div>
+          )}
         </div>
-        <textarea
-          value={io}
-          onChange={(e) => { setIo(e.target.value); setNote(""); }}
-          rows={8}
-          placeholder="paste a backup here, then tap Restore"
-          className={inputCls + " resize-y text-xs"}
-        />
-        <div className="flex gap-2 mt-2">
-          <button
-            onClick={async () => {
-              try {
-                const t = await navigator.clipboard.readText();
-                setIo(t);
-                setNote("Pasted " + t.length + " characters. Now tap Restore.");
-              } catch (e) {
-                setNote("Couldn't read the clipboard — long-press the box and paste manually.");
-              }
+
+        <button
+          onClick={() => {
+            const name = downloadBackup(state);
+            if (name) {
+              update((st2) => { st2.lastBackup = today; });
+              setNote("Saved " + name + " to your downloads.");
+            } else {
+              setNote("Couldn't write the file — use Copy below instead.");
+            }
+          }}
+          className="w-full py-2.5 mb-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600"
+        >
+          Save backup to a file
+        </button>
+
+        <label className="block w-full py-2.5 mb-3 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600 text-center cursor-pointer">
+          Restore from a file
+          <input
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              if (!f) return;
+              const r = new FileReader();
+              r.onload = () => {
+                try {
+                  const p = JSON.parse(String(r.result));
+                  if (!p || !p.settings) return setNote("That file has no settings in it.");
+                  const days = p.days ? Object.keys(p.days).length : 0;
+                  reload(migrate(p));
+                  setNote("Restored " + days + " logged days from " + f.name + ".");
+                } catch (err) {
+                  setNote("Couldn't read that file: " + err.message);
+                }
+              };
+              r.readAsText(f);
+              e.target.value = "";
             }}
-            className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-          >
-            Paste
-          </button>
-          <button
-            onClick={() => {
-              const t = (io || "").trim();
-              if (!t) return setNote("The box is empty — paste a backup first.");
-              if (t.charAt(0) !== "{") return setNote("That doesn't look like a backup; it should start with {.");
-              if (t.charAt(t.length - 1) !== "}") {
-                return setNote("The backup is cut off — it should end with }. Copy the whole thing and try again.");
-              }
-              let p;
-              try {
-                p = JSON.parse(t);
-              } catch (e) {
-                return setNote("Couldn't read that: " + e.message);
-              }
-              if (!p || !p.settings) return setNote("That backup has no settings in it.");
-              const days = p.days ? Object.keys(p.days).length : 0;
-              const done = p.days
-                ? Object.values(p.days).reduce((a, d) => a + ((d.videosDone || []).length), 0)
-                : 0;
-              reload(migrate(p));
-              setNote("Restored " + days + " logged days and " + done + " completed videos.");
-            }}
-            className="flex-1 py-2 rounded border border-emerald-800 bg-emerald-950 text-emerald-200 text-sm hover:border-emerald-600"
-          >
-            Restore
-          </button>
-        </div>
+          />
+        </label>
+
+        <details className="mb-2">
+          <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
+            copy and paste instead
+          </summary>
+          <div className="mt-2">
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => { setIo(JSON.stringify(state)); setNote(""); }}
+                className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
+              >
+                Export
+              </button>
+              <button
+                onClick={async () => {
+                  const text = io && io.charAt(0) === "{" ? io : JSON.stringify(state);
+                  setIo(text);
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    setNote("Copied " + text.length + " characters.");
+                  } catch (e) {
+                    setNote("Couldn't reach the clipboard — select the text and copy manually.");
+                  }
+                }}
+                className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
+              >
+                Copy
+              </button>
+            </div>
+            <textarea
+              value={io}
+              onChange={(e) => { setIo(e.target.value); setNote(""); }}
+              rows={5}
+              placeholder="paste a backup here, then tap Restore"
+              className={inputCls + " resize-y text-xs"}
+            />
+            <button
+              onClick={() => {
+                const t = (io || "").trim();
+                if (!t) return setNote("The box is empty.");
+                if (t.charAt(0) !== "{" || t.charAt(t.length - 1) !== "}") {
+                  return setNote("That looks cut off — it should start with { and end with }.");
+                }
+                try {
+                  const p = JSON.parse(t);
+                  if (!p || !p.settings) return setNote("That backup has no settings in it.");
+                  const days = p.days ? Object.keys(p.days).length : 0;
+                  reload(migrate(p));
+                  setNote("Restored " + days + " logged days.");
+                } catch (e) {
+                  setNote("Couldn't read that: " + e.message);
+                }
+              }}
+              className="mt-2 w-full py-2 rounded border border-emerald-800 bg-emerald-950 text-emerald-200 text-sm"
+            >
+              Restore from the box
+            </button>
+          </div>
+        </details>
+
         {note ? <div className="text-xs text-slate-400 mt-2 leading-relaxed">{note}</div> : null}
+
         <button
           onClick={() => { if (confirm("Erase all logged progress?")) reload(freshState()); }}
           className="mt-4 w-full py-2 rounded border border-slate-800 text-sm text-slate-600 hover:border-slate-700"
@@ -2238,6 +2552,7 @@ export default function StudyPlanner() {
   const [loading, setLoading] = useState(true);
   const [saveNote, setSaveNote] = useState("");
   const [savedAt, setSavedAt] = useState(null);
+  const [storageInfo, setStorageInfo] = useState(null);
   const timer = useRef(null);
   const today = dayKey(new Date());
 
@@ -2247,9 +2562,10 @@ export default function StudyPlanner() {
   useEffect(() => {
     let live = true;
     (async () => {
-      requestPersistence();
+      await requestPersistence();
       const { state: s, error } = await loadState();
       if (!live) return;
+      storageReport().then((r) => live && setStorageInfo(r));
       if (error) setSaveNote(error);
       setState(s || freshState());
       setLoading(false);
@@ -2310,6 +2626,10 @@ export default function StudyPlanner() {
   }
 
   const behind = en.delta < -0.01;
+  // Only nag on the web, where storage is the browser's to reclaim.
+  const onWeb = storageInfo && storageInfo.backend !== "Preferences";
+  const backupOverdue =
+    onWeb && (!state.lastBackup || daysBetween(state.lastBackup, today) > 14);
   const gapSections = cur.sections.filter((s) => s.videos.length === 0);
   const pace = state.settings.weekdayVideos * 5 + state.settings.satVideos + state.settings.sunVideos;
 
@@ -2319,6 +2639,7 @@ export default function StudyPlanner() {
     ["review", "Review"],
     ["progress", "Progress"],
     ["setup", "Setup"],
+    ["top", "★"],
   ];
 
   return (
@@ -2342,6 +2663,17 @@ export default function StudyPlanner() {
           </div>
         ) : null}
 
+        {backupOverdue && tab !== "setup" ? (
+          <button
+            onClick={() => setTab("setup")}
+            className="w-full text-left rounded border border-amber-900 bg-amber-950 px-3 py-2 mb-3 text-sm text-amber-200 hover:border-amber-700"
+          >
+            {state.lastBackup
+              ? `No backup file in ${daysBetween(state.lastBackup, today)} days — save one from Setup →`
+              : "No backup saved yet — save one from Setup →"}
+          </button>
+        ) : null}
+
         {saveNote ? (
           <div className="rounded border border-amber-800 bg-amber-950 px-3 py-2 mb-3 text-sm text-amber-200">
             <div className="font-medium">Not saving to this device</div>
@@ -2362,14 +2694,17 @@ export default function StudyPlanner() {
           </button>
         ) : null}
 
-        <div className="flex gap-1 mb-4 border-b border-slate-800">
+        <div className="flex gap-1 mb-4 border-b border-slate-800 overflow-x-auto">
           {TABS.map(([id, label]) => (
             <button
               key={id}
               onClick={() => setTab(id)}
               className={
-                "px-2.5 py-2 text-sm border-b-2 -mb-px transition-colors " +
-                (tab === id ? "border-cyan-400 text-cyan-300" : "border-transparent text-slate-500 hover:text-slate-300")
+                "px-2.5 py-2 text-sm border-b-2 -mb-px transition-colors whitespace-nowrap shrink-0 " +
+                (tab === id
+                  ? "border-cyan-400 " + (id === "top" ? "text-amber-300" : "text-cyan-300")
+                  : "border-transparent " +
+                    (id === "top" ? "text-amber-600 hover:text-amber-400" : "text-slate-500 hover:text-slate-300"))
               }
             >
               {label}
@@ -2379,10 +2714,11 @@ export default function StudyPlanner() {
 
         {tab === "today" ? <TodayView cur={cur} state={state} en={en} today={today} update={update} /> : null}
         {tab === "week" ? <WeekView cur={cur} state={state} en={en} today={today} update={update} setTab={setTab} /> : null}
+        {tab === "top" ? <TopView cur={cur} state={state} en={en} today={today} /> : null}
         {tab === "review" ? <ReviewView cur={cur} state={state} en={en} today={today} update={update} /> : null}
         {tab === "progress" ? <ProgressView cur={cur} state={state} en={en} today={today} /> : null}
         {tab === "setup" ? (
-          <SetupView cur={cur} state={state} en={en} update={update} reload={(s) => setState(s)} />
+          <SetupView cur={cur} state={state} en={en} update={update} reload={(s) => setState(s)} today={today} storageInfo={storageInfo} />
         ) : null}
 
         {tab === "setup" ? (

@@ -805,6 +805,7 @@ function computeEngine(cur, state, today) {
         qbank: v.qbank,
         amboss: v.amboss,
         hy: v.hy,
+        t1: v.t1,
       })),
       topics: back.map((v) => v.title),
     };
@@ -877,7 +878,7 @@ const KEY = "bnb-planner:state:v1";
 
 /* Bumped on every change. If the footer doesn't show this, the phone is running
    an older bundle than the one you uploaded. */
-const BUILD = "build 28 · Sep 13";
+const BUILD = "build 29 · Sep 13";
 
 /* Storage cascade. Capacitor Preferences on the phone, window.storage inside a
    Claude artifact, localStorage anywhere else. Each backend is probed once and
@@ -1074,24 +1075,6 @@ async function saveState(s) {
   }
 }
 
-function downloadBackup(state) {
-  try {
-    const name = "board-plan-" + dayKey(new Date()) + ".json";
-    const blob = new Blob([JSON.stringify(state)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return name;
-  } catch (e) {
-    return null;
-  }
-}
-
 /* ============================================================
    7. UI PRIMITIVES
    ============================================================ */
@@ -1155,6 +1138,13 @@ function Tag({ children, tone }) {
   return <span className={"px-1.5 py-0.5 rounded border text-xs font-mono uppercase " + c}>{children}</span>;
 }
 
+
+function Star({ v, trail }) {
+  if (!v) return null;
+  const cls = v.t1 ? "text-rose-400" : v.hy ? "text-amber-300" : null;
+  if (!cls) return null;
+  return <span className={cls + (trail ? "" : " mr-1")}>{trail ? "★ " : "★"}</span>;
+}
 
 function Field({ label, children }) {
   return (
@@ -1237,9 +1227,9 @@ function TodayView({ cur, state, en, today, update }) {
                     <Check
                       on={doneV.has(v.id)}
                       onClick={() => toggleV(v.id)}
-                      sub={v.t1 ? v.sectionName + " · top 25" : v.hy ? v.sectionName + " · high yield" : v.sectionName}
+                      sub={v.sectionName}
                     >
-                      {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      <Star v={v} />
                       {v.title}
                       {v.est !== 1 ? <span className="text-slate-500 font-mono text-xs"> · {v.est}u</span> : null}
                     </Check>
@@ -1267,7 +1257,7 @@ function TodayView({ cur, state, en, today, update }) {
                 <span className="font-mono text-xs text-slate-600 mr-2">+</span>
                 Watched an extra one — log{" "}
                 <span className="text-slate-300">
-                  {nextUp.hy ? <span className="text-amber-300">★ </span> : null}
+                  <Star v={nextUp} trail />
                   {nextUp.title}
                 </span>
               </button>
@@ -1378,7 +1368,7 @@ function TodayView({ cur, state, en, today, update }) {
                 <div key={it.title} className="rounded border border-slate-800 bg-slate-900 p-3">
                   <div className="flex items-baseline justify-between mb-1">
                     <span className="text-sm text-slate-200">
-                      {it.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                      <Star v={it} />
                       {it.title}
                     </span>
                     <span className="font-mono text-xs text-cyan-300">{day.pass2.per} Q</span>
@@ -1482,6 +1472,21 @@ function Empty() {
 function WeekView({ cur, state, en, today, update, setTab }) {
   const [offset, setOffset] = useState(0);
   const [editingQ, setEditingQ] = useState(null);
+  const [moved, setMoved] = useState(null);
+
+  // You can't have watched something tomorrow — ticking a future video means
+  // "I did this one instead", so it lands on today.
+  const toggleOn = (k, v) => {
+    const target = k > today ? today : k;
+    update((st2) => {
+      const d = (st2.days[target] = st2.days[target] || { type: "normal" });
+      d.videosDone = d.videosDone || [];
+      d.videosDone = d.videosDone.includes(v.id)
+        ? d.videosDone.filter((x) => x !== v.id)
+        : d.videosDone.concat(v.id);
+    });
+    setMoved(target !== k ? { id: v.id, title: v.title } : null);
+  };
 
   const setQ = (k, n) =>
     update((st2) => {
@@ -1505,7 +1510,8 @@ function WeekView({ cur, state, en, today, update, setTab }) {
     return { key: k, planned, log, videos: planned ? planned.videos : logged };
   });
 
-  const hyThisWeek = rows.reduce((a, r) => a + r.videos.filter((v) => v.hy).length, 0);
+  const t1ThisWeek = rows.reduce((a, r) => a + r.videos.filter((v) => v.t1).length, 0);
+  const hyThisWeek = rows.reduce((a, r) => a + r.videos.filter((v) => v.hy && !v.t1).length, 0);
   const doneThisWeek = rows.reduce((a, r) => a + (r.log.videosDone || []).length, 0);
   const qThisWeek = rows.reduce((a, r) => a + (r.log.questionsDone || 0), 0);
 
@@ -1517,12 +1523,33 @@ function WeekView({ cur, state, en, today, update, setTab }) {
         </button>
         <span className="font-mono text-sm text-slate-400">
           {fmtShort(week[0])} – {fmtShort(week[6])}
-          {hyThisWeek ? <span className="text-amber-300 ml-2">★ {hyThisWeek}</span> : null}
+          {t1ThisWeek ? <span className="text-rose-400 ml-2">★{t1ThisWeek}</span> : null}
+          {hyThisWeek ? <span className="text-amber-300 ml-2">★{hyThisWeek}</span> : null}
         </span>
         <button onClick={() => setOffset(offset + 1)} className="px-3 py-1 text-slate-400 hover:text-cyan-300 font-mono">
           →
         </button>
       </div>
+
+      {moved ? (
+        <div className="rounded border border-emerald-800 bg-emerald-950 px-3 py-2 text-sm text-emerald-200 flex items-center gap-2">
+          <span className="flex-1 min-w-0">
+            <span className="text-emerald-100">{moved.title}</span> logged to today — the rest shift back a day.
+          </span>
+          <button
+            onClick={() => {
+              update((st2) => {
+                const d = st2.days[today];
+                if (d && d.videosDone) d.videosDone = d.videosDone.filter((x) => x !== moved.id);
+              });
+              setMoved(null);
+            }}
+            className="text-xs text-emerald-400 hover:text-emerald-200 shrink-0"
+          >
+            undo
+          </button>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 rounded border border-slate-800 bg-slate-900">
         <div className="px-3 py-2 border-r border-slate-800">
@@ -1569,20 +1596,15 @@ function WeekView({ cur, state, en, today, update, setTab }) {
 
             {videos.length ? (
               <div className="space-y-1">
+                {k > today ? (
+                  <div className="text-xs text-slate-600 pb-1">tick one to do it today instead</div>
+                ) : null}
                 {videos.map((v) => {
                   const on = doneIds.includes(v.id);
                   return (
                     <div key={v.id} className="flex items-start gap-2 text-sm">
                       <button
-                        onClick={() =>
-                          update((st2) => {
-                            const d = (st2.days[k] = st2.days[k] || { type: "normal" });
-                            d.videosDone = d.videosDone || [];
-                            d.videosDone = d.videosDone.includes(v.id)
-                              ? d.videosDone.filter((x) => x !== v.id)
-                              : d.videosDone.concat(v.id);
-                          })
-                        }
+                        onClick={() => toggleOn(k, v)}
                         className={
                           "mt-0.5 shrink-0 w-4 h-4 rounded-sm border text-xs leading-none flex items-center justify-center " +
                           (on
@@ -1593,7 +1615,7 @@ function WeekView({ cur, state, en, today, update, setTab }) {
                         ✓
                       </button>
                       <span className={on ? "text-slate-500 line-through" : "text-slate-200"}>
-                        {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                        <Star v={v} />
                         {v.title}
                       </span>
                     </div>
@@ -1832,7 +1854,7 @@ function ProgressView({ cur, state, en, today }) {
             {en.weakTopics.map((w) => (
               <div key={w.id} className="p-3">
                 <div className="text-sm text-slate-200">
-                  {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                  <Star v={w.video} />
                   {w.video.title}
                   <span className="text-xs text-slate-600 font-mono ml-2">{w.video.sectionName}</span>
                 </div>
@@ -1921,7 +1943,7 @@ function ReviewView({ cur, state, en, today, update }) {
               <div key={w.id} className="rounded border border-rose-900 bg-rose-950 p-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-sm text-slate-100 min-w-0">
-                    {w.video.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                    <Star v={w.video} />
                     {w.video.title}
                   </span>
                   <button
@@ -2368,7 +2390,7 @@ function SetupView({ cur, state, en, update, reload, today, storageInfo }) {
                                 : "border-slate-600 text-transparent")}
                           >✓</button>
                           <span className={"flex-1 text-sm " + (on ? "text-slate-600 line-through" : "text-slate-300")}>
-                            {v.hy ? <span className="text-amber-300 mr-1">★</span> : null}
+                            <Star v={v} />
                             {v.title}
                           </span>
                           {dated ? (
@@ -2412,113 +2434,65 @@ function SetupView({ cur, state, en, update, reload, today, storageInfo }) {
           ) : null}
           {lastBackup ? (
             <div className={daysBetween(lastBackup, today) > 14 ? "text-amber-400" : "text-slate-500"}>
-              last saved to a file {daysBetween(lastBackup, today) === 0 ? "today" : daysBetween(lastBackup, today) + "d ago"}
+              last copied {daysBetween(lastBackup, today) === 0 ? "today" : daysBetween(lastBackup, today) + "d ago"}
             </div>
           ) : (
-            <div className="text-amber-400">never saved to a file</div>
+            <div className="text-amber-400">never backed up</div>
           )}
         </div>
 
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={() => { setIo(JSON.stringify(state)); setNote(""); }}
+            className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
+          >
+            Export
+          </button>
+          <button
+            onClick={async () => {
+              const text = io && io.charAt(0) === "{" ? io : JSON.stringify(state);
+              setIo(text);
+              try {
+                await navigator.clipboard.writeText(text);
+                update((st2) => { st2.lastBackup = today; });
+                setNote("Copied " + text.length + " characters. Paste it somewhere safe.");
+              } catch (e) {
+                setNote("Couldn't reach the clipboard — select the text below and copy it manually.");
+              }
+            }}
+            className="flex-1 py-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600"
+          >
+            Copy
+          </button>
+        </div>
+        <textarea
+          value={io}
+          onChange={(e) => { setIo(e.target.value); setNote(""); }}
+          rows={6}
+          placeholder="paste a backup here, then tap Restore"
+          className={inputCls + " resize-y text-xs"}
+        />
         <button
           onClick={() => {
-            const name = downloadBackup(state);
-            if (name) {
-              update((st2) => { st2.lastBackup = today; });
-              setNote("Saved " + name + " to your downloads.");
-            } else {
-              setNote("Couldn't write the file — use Copy below instead.");
+            const t = (io || "").trim();
+            if (!t) return setNote("The box is empty.");
+            if (t.charAt(0) !== "{" || t.charAt(t.length - 1) !== "}") {
+              return setNote("That looks cut off — it should start with { and end with }.");
+            }
+            try {
+              const parsed = JSON.parse(t);
+              if (!parsed || !parsed.settings) return setNote("That backup has no settings in it.");
+              const days = parsed.days ? Object.keys(parsed.days).length : 0;
+              reload(migrate(parsed));
+              setNote("Restored " + days + " logged days.");
+            } catch (e) {
+              setNote("Couldn't read that: " + e.message);
             }
           }}
-          className="w-full py-2.5 mb-2 rounded border border-cyan-800 bg-cyan-950 text-cyan-200 text-sm hover:border-cyan-600"
+          className="mt-2 w-full py-2 rounded border border-emerald-800 bg-emerald-950 text-emerald-200 text-sm"
         >
-          Save backup to a file
+          Restore from the box
         </button>
-
-        <label className="block w-full py-2.5 mb-3 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600 text-center cursor-pointer">
-          Restore from a file
-          <input
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files && e.target.files[0];
-              if (!f) return;
-              const r = new FileReader();
-              r.onload = () => {
-                try {
-                  const p = JSON.parse(String(r.result));
-                  if (!p || !p.settings) return setNote("That file has no settings in it.");
-                  const days = p.days ? Object.keys(p.days).length : 0;
-                  reload(migrate(p));
-                  setNote("Restored " + days + " logged days from " + f.name + ".");
-                } catch (err) {
-                  setNote("Couldn't read that file: " + err.message);
-                }
-              };
-              r.readAsText(f);
-              e.target.value = "";
-            }}
-          />
-        </label>
-
-        <details className="mb-2">
-          <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
-            copy and paste instead
-          </summary>
-          <div className="mt-2">
-            <div className="flex gap-2 mb-2">
-              <button
-                onClick={() => { setIo(JSON.stringify(state)); setNote(""); }}
-                className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-              >
-                Export
-              </button>
-              <button
-                onClick={async () => {
-                  const text = io && io.charAt(0) === "{" ? io : JSON.stringify(state);
-                  setIo(text);
-                  try {
-                    await navigator.clipboard.writeText(text);
-                    setNote("Copied " + text.length + " characters.");
-                  } catch (e) {
-                    setNote("Couldn't reach the clipboard — select the text and copy manually.");
-                  }
-                }}
-                className="flex-1 py-2 rounded border border-slate-700 text-sm text-slate-300 hover:border-slate-600"
-              >
-                Copy
-              </button>
-            </div>
-            <textarea
-              value={io}
-              onChange={(e) => { setIo(e.target.value); setNote(""); }}
-              rows={5}
-              placeholder="paste a backup here, then tap Restore"
-              className={inputCls + " resize-y text-xs"}
-            />
-            <button
-              onClick={() => {
-                const t = (io || "").trim();
-                if (!t) return setNote("The box is empty.");
-                if (t.charAt(0) !== "{" || t.charAt(t.length - 1) !== "}") {
-                  return setNote("That looks cut off — it should start with { and end with }.");
-                }
-                try {
-                  const p = JSON.parse(t);
-                  if (!p || !p.settings) return setNote("That backup has no settings in it.");
-                  const days = p.days ? Object.keys(p.days).length : 0;
-                  reload(migrate(p));
-                  setNote("Restored " + days + " logged days.");
-                } catch (e) {
-                  setNote("Couldn't read that: " + e.message);
-                }
-              }}
-              className="mt-2 w-full py-2 rounded border border-emerald-800 bg-emerald-950 text-emerald-200 text-sm"
-            >
-              Restore from the box
-            </button>
-          </div>
-        </details>
 
         {note ? <div className="text-xs text-slate-400 mt-2 leading-relaxed">{note}</div> : null}
 
@@ -2669,8 +2643,8 @@ export default function StudyPlanner() {
             className="w-full text-left rounded border border-amber-900 bg-amber-950 px-3 py-2 mb-3 text-sm text-amber-200 hover:border-amber-700"
           >
             {state.lastBackup
-              ? `No backup file in ${daysBetween(state.lastBackup, today)} days — save one from Setup →`
-              : "No backup saved yet — save one from Setup →"}
+              ? `No backup in ${daysBetween(state.lastBackup, today)} days — copy one from Setup →`
+              : "No backup yet — copy one from Setup →"}
           </button>
         ) : null}
 
